@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "client_utilities",
+  "version": "${version}",
+  "name": "Client Utilities", 
+  "description": "Scriptable macro mod (WASD/left click/delay/for loop) with import/export.",
+  "authors": ["linbei"],
+  "environment": "client",
+  "entrypoints": {
+    "client": ["de.linbei.macro.MacroModClient"]
+  },
+  "depends": {
+    "fabricloader": ">=0.16.14",
+    "minecraft": "~1.21.11"
+  }
+}
