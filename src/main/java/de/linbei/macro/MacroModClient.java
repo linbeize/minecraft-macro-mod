@@ -1,15 +1,15 @@
 package de.linbei.macro;
 
+import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import net.fabricmc.api.ClientModInitializer;
-import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
+import net.fabricmc.fabric.api.client.command.v2.ClientCommands;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
-import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.option.KeyBinding;
-import net.minecraft.client.util.InputUtil;
-import net.minecraft.text.Text;
+import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
+import net.minecraft.client.KeyMapping;
+import net.minecraft.client.Minecraft;
+import net.minecraft.network.chat.Component;
 import org.lwjgl.glfw.GLFW;
 
 import java.io.IOException;
@@ -17,9 +17,9 @@ import java.io.IOException;
 public class MacroModClient implements ClientModInitializer {
     private static final MacroEngine ENGINE = new MacroEngine();
 
-    private static KeyBinding toggleKey;
-    private static KeyBinding stopKey;
-    private static KeyBinding aimLockKey;
+    private static KeyMapping toggleKey;
+    private static KeyMapping stopKey;
+    private static KeyMapping aimLockKey;
     private static int toggleKeyCode;
     private static int stopKeyCode;
     private static Object lastWorldToken;
@@ -30,28 +30,28 @@ public class MacroModClient implements ClientModInitializer {
         toggleKeyCode = settings.toggleKey;
         stopKeyCode = settings.stopKey;
 
-        toggleKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-                "key.macro_mod.toggle", InputUtil.Type.KEYSYM, toggleKeyCode, KeyBinding.Category.MISC
+        toggleKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
+                "key.macro_mod.toggle", InputConstants.Type.KEYSYM, toggleKeyCode, KeyMapping.Category.MISC
         ));
-        stopKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-                "key.macro_mod.stop", InputUtil.Type.KEYSYM, stopKeyCode, KeyBinding.Category.MISC
+        stopKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
+                "key.macro_mod.stop", InputConstants.Type.KEYSYM, stopKeyCode, KeyMapping.Category.MISC
         ));
-        aimLockKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-                "key.macro_mod.aimlock", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_F7, KeyBinding.Category.MISC
+        aimLockKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
+                "key.macro_mod.aimlock", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_F7, KeyMapping.Category.MISC
         ));
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (lastWorldToken == null) {
-                lastWorldToken = client.world;
-            } else if (client.world != lastWorldToken) {
-                lastWorldToken = client.world;
+                lastWorldToken = client.level;
+            } else if (client.level != lastWorldToken) {
+                lastWorldToken = client.level;
                 if (ENGINE.isRunning()) {
                     ENGINE.stop();
                     msg(client, "World changed, macro auto-stopped");
                 }
             }
 
-            while (toggleKey.wasPressed()) {
+            while (toggleKey.consumeClick()) {
                 if (!ENGINE.isRunning()) {
                     tryStart(client);
                 } else {
@@ -59,11 +59,11 @@ public class MacroModClient implements ClientModInitializer {
                     msg(client, ENGINE.isPaused() ? "Macro paused" : "Macro resumed");
                 }
             }
-            while (stopKey.wasPressed()) {
+            while (stopKey.consumeClick()) {
                 ENGINE.stop();
                 msg(client, "Macro stopped");
             }
-            while (aimLockKey.wasPressed()) {
+            while (aimLockKey.consumeClick()) {
                 ENGINE.setAimLock(!ENGINE.isAimLock());
                 msg(client, "Aim lock: " + (ENGINE.isAimLock() ? "ON" : "OFF"));
             }
@@ -76,86 +76,86 @@ public class MacroModClient implements ClientModInitializer {
 
     private void registerCommands() {
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> dispatcher.register(
-                ClientCommandManager.literal("mmacro")
-                        .then(ClientCommandManager.literal("start").executes(ctx -> {
-                            tryStart(MinecraftClient.getInstance());
+                ClientCommands.literal("mmacro")
+                        .then(ClientCommands.literal("start").executes(ctx -> {
+                            tryStart(Minecraft.getInstance());
                             return 1;
                         }))
-                        .then(ClientCommandManager.literal("pause").executes(ctx -> {
+                        .then(ClientCommands.literal("pause").executes(ctx -> {
                             ENGINE.pauseToggle();
-                            msg(MinecraftClient.getInstance(), ENGINE.isPaused() ? "Macro paused" : "Macro resumed");
+                            msg(Minecraft.getInstance(), ENGINE.isPaused() ? "Macro paused" : "Macro resumed");
                             return 1;
                         }))
-                        .then(ClientCommandManager.literal("stop").executes(ctx -> {
+                        .then(ClientCommands.literal("stop").executes(ctx -> {
                             ENGINE.stop();
-                            msg(MinecraftClient.getInstance(), "Macro stopped");
+                            msg(Minecraft.getInstance(), "Macro stopped");
                             return 1;
                         }))
-                        .then(ClientCommandManager.literal("import")
-                                .then(ClientCommandManager.argument("name", StringArgumentType.word()).executes(ctx -> {
+                        .then(ClientCommands.literal("import")
+                                .then(ClientCommands.argument("name", StringArgumentType.word()).executes(ctx -> {
                                     String name = StringArgumentType.getString(ctx, "name");
                                     try {
                                         ENGINE.setScript(MacroStorage.load(name));
-                                        msg(MinecraftClient.getInstance(), "Imported script: " + name);
+                                        msg(Minecraft.getInstance(), "Imported script: " + name);
                                     } catch (Exception e) {
-                                        msg(MinecraftClient.getInstance(), "Import failed: " + e.getMessage());
+                                        msg(Minecraft.getInstance(), "Import failed: " + e.getMessage());
                                     }
                                     return 1;
                                 })))
-                        .then(ClientCommandManager.literal("export")
-                                .then(ClientCommandManager.argument("name", StringArgumentType.word()).executes(ctx -> {
+                        .then(ClientCommands.literal("export")
+                                .then(ClientCommands.argument("name", StringArgumentType.word()).executes(ctx -> {
                                     String name = StringArgumentType.getString(ctx, "name");
                                     try {
                                         MacroStorage.save(name, ENGINE.getScript());
-                                        msg(MinecraftClient.getInstance(), "Exported script: " + name);
+                                        msg(Minecraft.getInstance(), "Exported script: " + name);
                                     } catch (Exception e) {
-                                        msg(MinecraftClient.getInstance(), "Export failed: " + e.getMessage());
+                                        msg(Minecraft.getInstance(), "Export failed: " + e.getMessage());
                                     }
                                     return 1;
                                 })))
-                        .then(ClientCommandManager.literal("set")
-                                .then(ClientCommandManager.argument("script", StringArgumentType.greedyString()).executes(ctx -> {
+                        .then(ClientCommands.literal("set")
+                                .then(ClientCommands.argument("script", StringArgumentType.greedyString()).executes(ctx -> {
                                     String script = StringArgumentType.getString(ctx, "script");
                                     try {
                                         ENGINE.setScript(script);
-                                        msg(MinecraftClient.getInstance(), "Script loaded in memory");
+                                        msg(Minecraft.getInstance(), "Script loaded in memory");
                                     } catch (Exception e) {
-                                        msg(MinecraftClient.getInstance(), "Script parse error: " + e.getMessage());
+                                        msg(Minecraft.getInstance(), "Script parse error: " + e.getMessage());
                                     }
                                     return 1;
                                 })))
-                        .then(ClientCommandManager.literal("repeat")
-                                .then(ClientCommandManager.literal("on").executes(ctx -> {
+                        .then(ClientCommands.literal("repeat")
+                                .then(ClientCommands.literal("on").executes(ctx -> {
                                     ENGINE.setRepeat(true);
-                                    msg(MinecraftClient.getInstance(), "Repeat: ON");
+                                    msg(Minecraft.getInstance(), "Repeat: ON");
                                     return 1;
                                 }))
-                                .then(ClientCommandManager.literal("off").executes(ctx -> {
+                                .then(ClientCommands.literal("off").executes(ctx -> {
                                     ENGINE.setRepeat(false);
-                                    msg(MinecraftClient.getInstance(), "Repeat: OFF");
+                                    msg(Minecraft.getInstance(), "Repeat: OFF");
                                     return 1;
                                 })))
-                        .then(ClientCommandManager.literal("aimlock")
-                                .then(ClientCommandManager.literal("on").executes(ctx -> {
+                        .then(ClientCommands.literal("aimlock")
+                                .then(ClientCommands.literal("on").executes(ctx -> {
                                     ENGINE.setAimLock(true);
-                                    msg(MinecraftClient.getInstance(), "Aim lock: ON");
+                                    msg(Minecraft.getInstance(), "Aim lock: ON");
                                     return 1;
                                 }))
-                                .then(ClientCommandManager.literal("off").executes(ctx -> {
+                                .then(ClientCommands.literal("off").executes(ctx -> {
                                     ENGINE.setAimLock(false);
-                                    msg(MinecraftClient.getInstance(), "Aim lock: OFF");
+                                    msg(Minecraft.getInstance(), "Aim lock: OFF");
                                     return 1;
                                 })))
-                        .then(ClientCommandManager.literal("where").executes(ctx -> {
+                        .then(ClientCommands.literal("where").executes(ctx -> {
                             try {
-                                msg(MinecraftClient.getInstance(), "Scripts dir: " + MacroStorage.ensureDir());
+                                msg(Minecraft.getInstance(), "Scripts dir: " + MacroStorage.ensureDir());
                             } catch (IOException e) {
-                                msg(MinecraftClient.getInstance(), "Path error: " + e.getMessage());
+                                msg(Minecraft.getInstance(), "Path error: " + e.getMessage());
                             }
                             return 1;
                         }))
-                        .then(ClientCommandManager.literal("gui").executes(ctx -> {
-                            MinecraftClient client = MinecraftClient.getInstance();
+                        .then(ClientCommands.literal("gui").executes(ctx -> {
+                            Minecraft client = Minecraft.getInstance();
                             client.execute(() -> client.setScreen(new MacroManagerScreen(ENGINE)));
                             msg(client, "Opening Macro GUI...");
                             return 1;
@@ -163,7 +163,7 @@ public class MacroModClient implements ClientModInitializer {
         ));
     }
 
-    private void tryStart(MinecraftClient client) {
+    private void tryStart(Minecraft client) {
         try {
             ENGINE.start();
             msg(client, "Macro started");
@@ -210,24 +210,24 @@ public class MacroModClient implements ClientModInitializer {
     }
 
     public static String getToggleKeyName() {
-        return toggleKey.getBoundKeyLocalizedText().getString();
+        return toggleKey.getTranslatedKeyMessage().getString();
     }
 
     public static String getStopKeyName() {
-        return stopKey.getBoundKeyLocalizedText().getString();
+        return stopKey.getTranslatedKeyMessage().getString();
     }
 
     public static void setToggleKeyCode(int keyCode) {
         toggleKeyCode = keyCode;
-        toggleKey.setBoundKey(InputUtil.Type.KEYSYM.createFromCode(keyCode));
-        KeyBinding.updateKeysByCode();
+        toggleKey.setKey(InputConstants.Type.KEYSYM.getOrCreate(keyCode));
+        KeyMapping.resetMapping();
         saveSettings();
     }
 
     public static void setStopKeyCode(int keyCode) {
         stopKeyCode = keyCode;
-        stopKey.setBoundKey(InputUtil.Type.KEYSYM.createFromCode(keyCode));
-        KeyBinding.updateKeysByCode();
+        stopKey.setKey(InputConstants.Type.KEYSYM.getOrCreate(keyCode));
+        KeyMapping.resetMapping();
         saveSettings();
     }
 
@@ -238,7 +238,9 @@ public class MacroModClient implements ClientModInitializer {
         MacroSettings.save(s);
     }
 
-    private static void msg(MinecraftClient client, String m) {
-        if (client != null && client.player != null) client.player.sendMessage(Text.literal("[MacroMod] " + m), false);
+    private static void msg(Minecraft client, String m) {
+        if (client != null && client.player != null) {
+            client.player.sendSystemMessage(Component.literal("[MacroMod] " + m));
+        }
     }
 }
