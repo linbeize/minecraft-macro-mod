@@ -1,12 +1,12 @@
 package de.linbei.macro;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.client.gui.widget.TextFieldWidget;
-import net.minecraft.client.input.KeyInput;
-import net.minecraft.text.Text;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.KeyEvent;
+import net.minecraft.network.chat.Component;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -18,15 +18,15 @@ public class MacroManagerScreen extends Screen {
     private int scriptIndex = 0;
     private String status = "";
 
-    private TextFieldWidget nameInput;
-    private ButtonWidget repeatBtn;
-    private ButtonWidget aimLockBtn;
-    private ButtonWidget toggleBindBtn;
-    private ButtonWidget stopBindBtn;
+    private EditBox nameInput;
+    private Button repeatBtn;
+    private Button aimLockBtn;
+    private Button toggleBindBtn;
+    private Button stopBindBtn;
     private BindTarget waitingBind = BindTarget.NONE;
 
     public MacroManagerScreen(MacroEngine engine) {
-        super(Text.literal("Macro Manager"));
+        super(Component.literal("Macro Manager"));
         this.engine = engine;
     }
 
@@ -37,68 +37,68 @@ public class MacroManagerScreen extends Screen {
 
         refreshScripts();
 
-        nameInput = new TextFieldWidget(this.textRenderer, left, y, 160, 20, Text.literal("script name"));
+        nameInput = new EditBox(this.font, left, y, 160, 20, Component.literal("script name"));
         nameInput.setMaxLength(64);
-        if (!scripts.isEmpty()) nameInput.setText(scripts.get(scriptIndex));
-        this.addDrawableChild(nameInput);
+        if (!scripts.isEmpty()) nameInput.setValue(scripts.get(scriptIndex));
+        this.addRenderableWidget(nameInput);
 
-        this.addDrawableChild(ButtonWidget.builder(Text.literal("Refresh"), b -> refreshScripts())
-                .dimensions(left + 170, y, 70, 20).build());
-        this.addDrawableChild(ButtonWidget.builder(Text.literal("Prev"), b -> stepScript(-1))
-                .dimensions(left + 245, y, 60, 20).build());
+        this.addRenderableWidget(Button.builder(Component.literal("Refresh"), b -> refreshScripts())
+                .bounds(left + 170, y, 70, 20).build());
+        this.addRenderableWidget(Button.builder(Component.literal("Prev"), b -> stepScript(-1))
+                .bounds(left + 245, y, 60, 20).build());
 
         y += 26;
-        this.addDrawableChild(ButtonWidget.builder(Text.literal("Next"), b -> stepScript(1))
-                .dimensions(left, y, 60, 20).build());
-        this.addDrawableChild(ButtonWidget.builder(Text.literal("Load"), b -> loadSelected())
-                .dimensions(left + 65, y, 60, 20).build());
-        this.addDrawableChild(ButtonWidget.builder(Text.literal("Save"), b -> saveCurrent())
-                .dimensions(left + 130, y, 60, 20).build());
-        this.addDrawableChild(ButtonWidget.builder(Text.literal("Delete"), b -> deleteSelected())
-                .dimensions(left + 195, y, 60, 20).build());
-        this.addDrawableChild(ButtonWidget.builder(Text.literal("New Template"), b -> newTemplate())
-                .dimensions(left + 260, y, 95, 20).build());
+        this.addRenderableWidget(Button.builder(Component.literal("Next"), b -> stepScript(1))
+                .bounds(left, y, 60, 20).build());
+        this.addRenderableWidget(Button.builder(Component.literal("Load"), b -> loadSelected())
+                .bounds(left + 65, y, 60, 20).build());
+        this.addRenderableWidget(Button.builder(Component.literal("Save"), b -> saveCurrent())
+                .bounds(left + 130, y, 60, 20).build());
+        this.addRenderableWidget(Button.builder(Component.literal("Delete"), b -> deleteSelected())
+                .bounds(left + 195, y, 60, 20).build());
+        this.addRenderableWidget(Button.builder(Component.literal("New Template"), b -> newTemplate())
+                .bounds(left + 260, y, 95, 20).build());
 
         y += 30;
-        this.addDrawableChild(ButtonWidget.builder(Text.literal("Start / Pause"), b -> toggleRun())
-                .dimensions(left, y, 100, 20).build());
-        this.addDrawableChild(ButtonWidget.builder(Text.literal("Stop"), b -> {
+        this.addRenderableWidget(Button.builder(Component.literal("Start / Pause"), b -> toggleRun())
+                .bounds(left, y, 100, 20).build());
+        this.addRenderableWidget(Button.builder(Component.literal("Stop"), b -> {
                     engine.stop();
                     status = "Stopped";
                 })
-                .dimensions(left + 105, y, 60, 20).build());
-        this.addDrawableChild(ButtonWidget.builder(Text.literal("Close"), b -> close())
-                .dimensions(left + 170, y, 70, 20).build());
+                .bounds(left + 105, y, 60, 20).build());
+        this.addRenderableWidget(Button.builder(Component.literal("Close"), b -> onClose())
+                .bounds(left + 170, y, 70, 20).build());
 
-        repeatBtn = this.addDrawableChild(ButtonWidget.builder(Text.literal(""), b -> {
+        repeatBtn = this.addRenderableWidget(Button.builder(Component.literal(""), b -> {
                     engine.setRepeat(!engine.isRepeat());
                     refreshToggleLabels();
                     status = "Repeat: " + (engine.isRepeat() ? "ON" : "OFF");
                 })
-                .dimensions(left + 245, y, 110, 20).build());
+                .bounds(left + 245, y, 110, 20).build());
 
         y += 26;
-        aimLockBtn = this.addDrawableChild(ButtonWidget.builder(Text.literal(""), b -> {
+        aimLockBtn = this.addRenderableWidget(Button.builder(Component.literal(""), b -> {
                     engine.setAimLock(!engine.isAimLock());
                     refreshToggleLabels();
                     status = "Aim lock: " + (engine.isAimLock() ? "ON" : "OFF");
                 })
-                .dimensions(left, y, 140, 20).build());
+                .bounds(left, y, 140, 20).build());
 
-        toggleBindBtn = this.addDrawableChild(ButtonWidget.builder(Text.literal(""), b -> {
+        toggleBindBtn = this.addRenderableWidget(Button.builder(Component.literal(""), b -> {
                     waitingBind = BindTarget.TOGGLE;
                     refreshToggleLabels();
                     status = "Press a key for Start/Pause hotkey...";
                 })
-                .dimensions(left + 145, y, 170, 20).build());
+                .bounds(left + 145, y, 170, 20).build());
 
         y += 26;
-        stopBindBtn = this.addDrawableChild(ButtonWidget.builder(Text.literal(""), b -> {
+        stopBindBtn = this.addRenderableWidget(Button.builder(Component.literal(""), b -> {
                     waitingBind = BindTarget.STOP;
                     refreshToggleLabels();
                     status = "Press a key for Stop hotkey...";
                 })
-                .dimensions(left, y, 170, 20).build());
+                .bounds(left, y, 170, 20).build());
 
         refreshToggleLabels();
     }
@@ -116,7 +116,7 @@ public class MacroManagerScreen extends Screen {
             } else {
                 scriptIndex = Math.min(scriptIndex, scripts.size() - 1);
             }
-            if (nameInput != null && !scripts.isEmpty()) nameInput.setText(scripts.get(scriptIndex));
+            if (nameInput != null && !scripts.isEmpty()) nameInput.setValue(scripts.get(scriptIndex));
             status = "Loaded list: " + scripts.size() + " script(s)";
         } catch (Exception e) {
             status = "Refresh failed: " + e.getMessage();
@@ -124,7 +124,7 @@ public class MacroManagerScreen extends Screen {
     }
 
     private String currentName() {
-        String n = nameInput == null ? "" : nameInput.getText().trim();
+        String n = nameInput == null ? "" : nameInput.getValue().trim();
         if (n.toLowerCase().endsWith(".txt")) n = n.substring(0, n.length() - 4);
         return n.isEmpty() ? null : n;
     }
@@ -132,7 +132,7 @@ public class MacroManagerScreen extends Screen {
     private void stepScript(int delta) {
         if (scripts.isEmpty()) return;
         scriptIndex = (scriptIndex + delta + scripts.size()) % scripts.size();
-        nameInput.setText(scripts.get(scriptIndex));
+        nameInput.setValue(scripts.get(scriptIndex));
     }
 
     private void loadSelected() {
@@ -198,18 +198,18 @@ public class MacroManagerScreen extends Screen {
 
     private void refreshToggleLabels() {
         if (repeatBtn != null) {
-            repeatBtn.setMessage(Text.literal("Repeat: " + (engine.isRepeat() ? "ON" : "OFF")));
+            repeatBtn.setMessage(Component.literal("Repeat: " + (engine.isRepeat() ? "ON" : "OFF")));
         }
         if (aimLockBtn != null) {
-            aimLockBtn.setMessage(Text.literal("AimLock: " + (engine.isAimLock() ? "ON" : "OFF")));
+            aimLockBtn.setMessage(Component.literal("AimLock: " + (engine.isAimLock() ? "ON" : "OFF")));
         }
         if (toggleBindBtn != null) {
             String t = waitingBind == BindTarget.TOGGLE ? "Start/Pause: [Press key...]" : "Start/Pause: " + MacroModClient.getToggleKeyName();
-            toggleBindBtn.setMessage(Text.literal(t));
+            toggleBindBtn.setMessage(Component.literal(t));
         }
         if (stopBindBtn != null) {
             String t = waitingBind == BindTarget.STOP ? "Stop: [Press key...]" : "Stop: " + MacroModClient.getStopKeyName();
-            stopBindBtn.setMessage(Text.literal(t));
+            stopBindBtn.setMessage(Component.literal(t));
         }
     }
 
@@ -231,42 +231,46 @@ public class MacroManagerScreen extends Screen {
     }
 
     @Override
-    public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        context.fill(0, 0, this.width, this.height, 0xB0101010);
-        super.render(context, mouseX, mouseY, delta);
+    public void extractBackground(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float delta) {
+        graphics.fill(0, 0, this.width, this.height, 0xB0101010);
+    }
+
+    @Override
+    public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float delta) {
+        super.extractRenderState(graphics, mouseX, mouseY, delta);
 
         int left = this.width / 2 - 155;
         int y = 12;
-        context.drawText(this.textRenderer, this.title, left, y, 0xFFFFFF, false);
+        graphics.text(this.font, this.title, left, y, 0xFFFFFF, false);
         y += 90;
 
-        context.drawText(this.textRenderer, Text.literal("Current script in memory:"), left, y, 0xA0A0A0, false);
+        graphics.text(this.font, Component.literal("Current script in memory:"), left, y, 0xA0A0A0, false);
         y += 12;
 
         String script = engine.getScript();
         if (script == null || script.isBlank()) {
-            context.drawText(this.textRenderer, Text.literal("(empty)"), left, y, 0x808080, false);
+            graphics.text(this.font, Component.literal("(empty)"), left, y, 0x808080, false);
             y += 12;
         } else {
             String[] ls = script.split("\\R");
             int max = Math.min(ls.length, 10);
             for (int i = 0; i < max; i++) {
-                context.drawText(this.textRenderer, Text.literal((i + 1) + ": " + ls[i]), left, y, 0xD0D0D0, false);
+                graphics.text(this.font, Component.literal((i + 1) + ": " + ls[i]), left, y, 0xD0D0D0, false);
                 y += 10;
             }
             if (ls.length > max) {
-                context.drawText(this.textRenderer, Text.literal("...(" + (ls.length - max) + " more lines)"), left, y, 0x808080, false);
+                graphics.text(this.font, Component.literal("...(" + (ls.length - max) + " more lines)"), left, y, 0x808080, false);
                 y += 10;
             }
         }
 
         y = this.height - 20;
         int color = status.toLowerCase().contains("failed") ? 0xFF6060 : 0x80FF80;
-        context.drawText(this.textRenderer, Text.literal(status), left, y, color, false);
+        graphics.text(this.font, Component.literal(status), left, y, color, false);
     }
 
     @Override
-    public boolean keyPressed(KeyInput keyInput) {
+    public boolean keyPressed(KeyEvent keyInput) {
         int keyCode = keyInput.key();
         if (waitingBind == BindTarget.TOGGLE) {
             MacroModClient.setToggleKeyCode(keyCode);
@@ -286,8 +290,8 @@ public class MacroManagerScreen extends Screen {
     }
 
     @Override
-    public void close() {
-        MinecraftClient.getInstance().setScreen(null);
+    public void onClose() {
+        Minecraft.getInstance().setScreen(null);
     }
 
     private enum BindTarget {
