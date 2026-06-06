@@ -1,6 +1,6 @@
-# Client Utilities (Fabric 1.21.11)
+# Client Utilities (Fabric 26.1)
 
-一个用于 Minecraft Fabric **1.21.11** 的客户端宏模组，支持脚本循环、导入导出、GUI 管理与热键控制。
+一个用于 Minecraft Fabric **26.1** 的客户端宏模组，支持脚本循环、导入导出、GUI 管理与热键控制。
 
 ## 功能
 
@@ -46,7 +46,7 @@
 gradle build
 ```
 
-产物：`build/libs/client-utilities-0.1.0.jar`
+产物：`build/libs/client-utilities-0.2.0.jar`
 
 ## 说明
 
