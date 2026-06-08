@@ -7,6 +7,7 @@ import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallba
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gui.screen.ingame.HandledScreen;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.InputUtil;
 import net.minecraft.text.Text;
@@ -49,6 +50,11 @@ public class MacroModClient implements ClientModInitializer {
                     ENGINE.stop();
                     msg(client, "World changed, macro auto-stopped");
                 }
+            }
+
+            if (ENGINE.isRunning() && client.currentScreen instanceof HandledScreen<?>) {
+                ENGINE.stop();
+                msg(client, "Inventory opened, macro auto-stopped");
             }
 
             while (toggleKey.wasPressed()) {
