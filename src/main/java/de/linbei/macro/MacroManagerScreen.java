@@ -12,18 +12,19 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class MacroManagerScreen extends Screen {
-    private final MacroEngine engine;
+    private static final int SCRIPT_ROWS = 8;
+    private static final int MAX_SCRIPT_CHARS = 200000;
 
+    private final MacroEngine engine;
     private final List<String> scripts = new ArrayList<>();
+    private final List<EditBox> editorInputs = new ArrayList<>();
+
     private int scriptIndex = 0;
+    private int scriptPage = 0;
+    private int visibleEditorLines = 0;
     private String status = "";
 
-    private static final int VISIBLE_EDITOR_LINES = 10;
-
     private EditBox nameInput;
-    private final List<EditBox> scriptLineInputs = new ArrayList<>();
-    private final List<String> editorLines = new ArrayList<>();
-    private int editorLineOffset = 0;
     private Button repeatBtn;
     private Button aimLockBtn;
     private Button toggleBindBtn;
@@ -37,101 +38,171 @@ public class MacroManagerScreen extends Screen {
 
     @Override
     protected void init() {
-        int left = this.width / 2 - 180;
-        int editorWidth = 360;
-        int y = 32;
-        scriptLineInputs.clear();
+        int margin = 18;
+        int left = margin;
+        int leftWidth = Math.min(720, Math.max(520, this.width * 38 / 100));
+        int editorLeft = left + leftWidth + 22;
+        int editorWidth = Math.max(260, this.width - editorLeft - margin);
+        int top = 14;
+        int rowHeight = 38;
+        int rowGap = 10;
 
+        editorInputs.clear();
         refreshScripts();
 
-        nameInput = new EditBox(this.font, left, y, 165, 20, Component.literal("script name"));
+        nameInput = new EditBox(this.font, left, top, Math.min(340, leftWidth - 360), rowHeight, Component.literal("script name"));
         nameInput.setMaxLength(64);
         if (!scripts.isEmpty()) nameInput.setValue(scripts.get(scriptIndex));
         this.addRenderableWidget(nameInput);
 
-        this.addRenderableWidget(Button.builder(Component.literal("Refresh"), b -> refreshScripts())
-                .bounds(left + 170, y, 70, 20).build());
-        this.addRenderableWidget(Button.builder(Component.literal("Prev"), b -> stepScript(-1))
-                .bounds(left + 245, y, 55, 20).build());
-        this.addRenderableWidget(Button.builder(Component.literal("Next"), b -> stepScript(1))
-                .bounds(left + 305, y, 55, 20).build());
+        int x = left + nameInput.getWidth() + 8;
+        this.addRenderableWidget(Button.builder(Component.literal("新建"), b -> newTemplate())
+                .bounds(x, top, 82, rowHeight).build());
+        this.addRenderableWidget(Button.builder(Component.literal("刷新"), b -> {
+                    refreshScripts();
+                    this.rebuildWidgets();
+                })
+                .bounds(x + 90, top, 82, rowHeight).build());
+        this.addRenderableWidget(Button.builder(Component.literal("上一页"), b -> stepScriptPage(-1))
+                .bounds(x + 180, top, 118, rowHeight).build());
+        this.addRenderableWidget(Button.builder(Component.literal("下一页"), b -> stepScriptPage(1))
+                .bounds(x + 180, top + rowHeight + 8, 118, rowHeight).build());
 
-        y += 26;
-        this.addRenderableWidget(Button.builder(Component.literal("Load"), b -> loadSelected())
-                .bounds(left, y, 55, 20).build());
-        this.addRenderableWidget(Button.builder(Component.literal("Apply"), b -> applyEditor())
-                .bounds(left + 60, y, 55, 20).build());
-        this.addRenderableWidget(Button.builder(Component.literal("Save"), b -> saveCurrent())
-                .bounds(left + 120, y, 55, 20).build());
-        this.addRenderableWidget(Button.builder(Component.literal("Delete"), b -> deleteSelected())
-                .bounds(left + 180, y, 60, 20).build());
-        this.addRenderableWidget(Button.builder(Component.literal("New Template"), b -> newTemplate())
-                .bounds(left + 245, y, 115, 20).build());
+        int listTop = top + rowHeight + 24;
+        for (int i = 0; i < SCRIPT_ROWS; i++) {
+            int y = listTop + i * (rowHeight + rowGap);
+            int row = i;
+            int nameWidth = Math.max(220, leftWidth - 402);
+            this.addRenderableWidget(Button.builder(Component.literal(scriptNameForRow(row)), b -> selectRow(row))
+                    .bounds(left, y, nameWidth, rowHeight).build());
+            int bx = left + nameWidth + 8;
+            this.addRenderableWidget(Button.builder(Component.literal("选"), b -> selectRow(row))
+                    .bounds(bx, y, 66, rowHeight).build());
+            this.addRenderableWidget(Button.builder(Component.literal("编"), b -> editRow(row))
+                    .bounds(bx + 76, y, 66, rowHeight).build());
+            this.addRenderableWidget(Button.builder(Component.literal("复"), b -> copyRow(row))
+                    .bounds(bx + 152, y, 66, rowHeight).build());
+            this.addRenderableWidget(Button.builder(Component.literal("删"), b -> deleteRow(row))
+                    .bounds(bx + 228, y, 66, rowHeight).build());
+        }
 
-        y += 30;
-        this.addRenderableWidget(Button.builder(Component.literal("Start / Pause"), b -> toggleRun())
-                .bounds(left, y, 100, 20).build());
+        int controlsTop = listTop + SCRIPT_ROWS * (rowHeight + rowGap) + 8;
+        this.addRenderableWidget(Button.builder(Component.literal("载入编辑器"), b -> loadSelected())
+                .bounds(left, controlsTop, 124, rowHeight).build());
+        this.addRenderableWidget(Button.builder(Component.literal("保存编辑器"), b -> saveCurrent())
+                .bounds(left + 134, controlsTop, 124, rowHeight).build());
+        this.addRenderableWidget(Button.builder(Component.literal("Start/Pause"), b -> toggleRun())
+                .bounds(left + 268, controlsTop, 124, rowHeight).build());
         this.addRenderableWidget(Button.builder(Component.literal("Stop"), b -> {
                     engine.stop();
                     status = "Stopped";
                 })
-                .bounds(left + 105, y, 60, 20).build());
-        this.addRenderableWidget(Button.builder(Component.literal("Close"), b -> onClose())
-                .bounds(left + 170, y, 70, 20).build());
+                .bounds(left + 402, controlsTop, 86, rowHeight).build());
 
+        controlsTop += rowHeight + 10;
         repeatBtn = this.addRenderableWidget(Button.builder(Component.literal(""), b -> {
                     engine.setRepeat(!engine.isRepeat());
                     refreshToggleLabels();
                     status = "Repeat: " + (engine.isRepeat() ? "ON" : "OFF");
                 })
-                .bounds(left + 250, y, 110, 20).build());
-
-        y += 26;
+                .bounds(left, controlsTop, 124, rowHeight).build());
         aimLockBtn = this.addRenderableWidget(Button.builder(Component.literal(""), b -> {
                     engine.setAimLock(!engine.isAimLock());
                     refreshToggleLabels();
                     status = "Aim lock: " + (engine.isAimLock() ? "ON" : "OFF");
                 })
-                .bounds(left, y, 140, 20).build());
-
+                .bounds(left + 134, controlsTop, 124, rowHeight).build());
         toggleBindBtn = this.addRenderableWidget(Button.builder(Component.literal(""), b -> {
                     waitingBind = BindTarget.TOGGLE;
                     refreshToggleLabels();
                     status = "Press a key for Start/Pause hotkey...";
                 })
-                .bounds(left + 145, y, 170, 20).build());
+                .bounds(left + 268, controlsTop, 174, rowHeight).build());
 
-        y += 26;
+        controlsTop += rowHeight + 10;
         stopBindBtn = this.addRenderableWidget(Button.builder(Component.literal(""), b -> {
                     waitingBind = BindTarget.STOP;
                     refreshToggleLabels();
                     status = "Press a key for Stop hotkey...";
                 })
-                .bounds(left, y, 170, 20).build());
+                .bounds(left, controlsTop, 174, rowHeight).build());
+        this.addRenderableWidget(Button.builder(Component.literal("关闭"), b -> onClose())
+                .bounds(left + 184, controlsTop, 86, rowHeight).build());
 
-        y += 30;
-        this.addRenderableWidget(Button.builder(Component.literal("Line Up"), b -> scrollEditor(-1))
-                .bounds(left, y, 70, 20).build());
-        this.addRenderableWidget(Button.builder(Component.literal("Line Down"), b -> scrollEditor(1))
-                .bounds(left + 75, y, 80, 20).build());
-        this.addRenderableWidget(Button.builder(Component.literal("Add Line"), b -> addEditorLine())
-                .bounds(left + 160, y, 75, 20).build());
-        this.addRenderableWidget(Button.builder(Component.literal("Del Blank"), b -> deleteTrailingBlankLine())
-                .bounds(left + 240, y, 80, 20).build());
-        this.addRenderableWidget(Button.builder(Component.literal("Clear"), b -> clearEditor())
-                .bounds(left + 325, y, 35, 20).build());
-
-        y += 24;
-        setEditorScript(engine.getScript());
-        for (int i = 0; i < VISIBLE_EDITOR_LINES; i++) {
-            EditBox line = new EditBox(this.font, left + 26, y + i * 18, editorWidth - 26, 16, Component.literal("script line"));
+        int editorTop = top + 8;
+        int editorBottom = this.height - 52;
+        visibleEditorLines = Math.max(1, (editorBottom - editorTop - 12) / 18);
+        for (int i = 0; i < visibleEditorLines; i++) {
+            EditBox line = new EditBox(this.font, editorLeft + 8, editorTop + 6 + i * 18, editorWidth - 16, 16, Component.literal("script line"));
             line.setMaxLength(512);
-            scriptLineInputs.add(line);
+            line.setBordered(false);
+            line.setTextColor(0xFFFFFF);
+            line.setTextColorUneditable(0xFFFFFF);
+            line.setTextShadow(true);
+            editorInputs.add(line);
             this.addRenderableWidget(line);
         }
-        refreshEditorInputs();
-
+        setEditorScript(engine.getScript());
         refreshToggleLabels();
+    }
+
+    private String scriptNameForRow(int row) {
+        int idx = scriptPage * SCRIPT_ROWS + row;
+        return idx >= 0 && idx < scripts.size() ? scripts.get(idx) : "";
+    }
+
+    private int scriptIndexForRow(int row) {
+        int idx = scriptPage * SCRIPT_ROWS + row;
+        return idx >= 0 && idx < scripts.size() ? idx : -1;
+    }
+
+    private void selectRow(int row) {
+        int idx = scriptIndexForRow(row);
+        if (idx < 0) return;
+        scriptIndex = idx;
+        nameInput.setValue(scripts.get(scriptIndex));
+        status = "Selected: " + scripts.get(scriptIndex);
+    }
+
+    private void editRow(int row) {
+        selectRow(row);
+        loadSelected();
+    }
+
+    private void copyRow(int row) {
+        int idx = scriptIndexForRow(row);
+        if (idx < 0) return;
+        String source = scripts.get(idx);
+        try {
+            String target = nextCopyName(source);
+            MacroStorage.save(target, MacroStorage.load(source));
+            refreshScripts();
+            nameInput.setValue(target);
+            status = "Copied: " + target;
+        } catch (Exception e) {
+            status = "Copy failed: " + e.getMessage();
+        }
+    }
+
+    private void deleteRow(int row) {
+        int idx = scriptIndexForRow(row);
+        if (idx < 0) return;
+        nameInput.setValue(scripts.get(idx));
+        deleteSelected();
+    }
+
+    private String nextCopyName(String source) throws Exception {
+        for (int i = 1; i < 1000; i++) {
+            String name = source + "_copy" + i;
+            if (!MacroStorage.listScriptNames().contains(name)) return name;
+        }
+        return source + "_copy";
+    }
+
+    private void stepScriptPage(int delta) {
+        int pages = Math.max(1, (scripts.size() + SCRIPT_ROWS - 1) / SCRIPT_ROWS);
+        scriptPage = (scriptPage + delta + pages) % pages;
+        this.rebuildWidgets();
     }
 
     private void refreshScripts() {
@@ -141,12 +212,14 @@ public class MacroManagerScreen extends Screen {
             scripts.addAll(MacroStorage.listScriptNames());
             if (scripts.isEmpty()) {
                 scriptIndex = 0;
+                scriptPage = 0;
             } else if (current != null) {
                 int idx = scripts.indexOf(current);
-                scriptIndex = idx >= 0 ? idx : 0;
+                scriptIndex = idx >= 0 ? idx : Math.min(scriptIndex, scripts.size() - 1);
             } else {
                 scriptIndex = Math.min(scriptIndex, scripts.size() - 1);
             }
+            scriptPage = Math.min(scriptPage, Math.max(0, (scripts.size() + SCRIPT_ROWS - 1) / SCRIPT_ROWS - 1));
             if (nameInput != null && !scripts.isEmpty()) nameInput.setValue(scripts.get(scriptIndex));
             status = "Loaded list: " + scripts.size() + " script(s)";
         } catch (Exception e) {
@@ -158,12 +231,6 @@ public class MacroManagerScreen extends Screen {
         String n = nameInput == null ? "" : nameInput.getValue().trim();
         if (n.toLowerCase().endsWith(".txt")) n = n.substring(0, n.length() - 4);
         return n.isEmpty() ? null : n;
-    }
-
-    private void stepScript(int delta) {
-        if (scripts.isEmpty()) return;
-        scriptIndex = (scriptIndex + delta + scripts.size()) % scripts.size();
-        nameInput.setValue(scripts.get(scriptIndex));
     }
 
     private void loadSelected() {
@@ -194,6 +261,7 @@ public class MacroManagerScreen extends Screen {
             MacroStorage.save(name, script);
             refreshScripts();
             status = "Saved: " + name;
+            this.rebuildWidgets();
         } catch (Exception e) {
             status = "Save failed: " + e.getMessage();
         }
@@ -209,6 +277,7 @@ public class MacroManagerScreen extends Screen {
             MacroStorage.delete(name);
             refreshScripts();
             status = "Deleted: " + name;
+            this.rebuildWidgets();
         } catch (Exception e) {
             status = "Delete failed: " + e.getMessage();
         }
@@ -220,13 +289,14 @@ public class MacroManagerScreen extends Screen {
             status = "Name is empty";
             return;
         }
-        String tpl = "LeftDown\nFor 3\nKeyDown \"W\"\nDelay 1200\nKeyUp \"W\"\nDelay 200\nKeyPress \"Num 2\"\nDelay 500\nNext\nLeftUp\n";
+        String tpl = "LeftDown 1,\nFor 9,\nKeyDown \"W\", 1,\nKeyDown \"D\", 1,\nDelay 41000,\nKeyUp \"W\", 1,\nKeyUp \"D\", 1,\nDelay 500,\nNext,\nLeftUp 1,\n";
         try {
             setEditorScript(tpl);
             engine.setScript(tpl);
             MacroStorage.save(name, tpl);
             refreshScripts();
             status = "Template created: " + name;
+            this.rebuildWidgets();
         } catch (Exception e) {
             status = "Template failed: " + e.getMessage();
         }
@@ -234,74 +304,37 @@ public class MacroManagerScreen extends Screen {
 
     private String editorScript() {
         syncEditorFromInputs();
-        return String.join("\n", editorLines).stripTrailing() + "\n";
+        return String.join("\n", visibleEditorLines()) .stripTrailing() + "\n";
+    }
+
+    private List<String> visibleEditorLines() {
+        List<String> out = new ArrayList<>();
+        for (int i = 0; i < visibleEditorLines; i++) {
+            out.add(i < editorInputs.size() ? editorInputs.get(i).getValue() : "");
+        }
+        return out;
     }
 
     private void setEditorScript(String script) {
-        editorLines.clear();
+        List<String> lines = splitScript(script);
+        for (int i = 0; i < editorInputs.size(); i++) {
+            editorInputs.get(i).setValue(i < lines.size() ? lines.get(i) : "");
+        }
+    }
+
+    private List<String> splitScript(String script) {
         String text = script == null ? "" : script;
+        List<String> lines = new ArrayList<>();
         if (!text.isEmpty()) {
-            editorLines.addAll(List.of(text.split("\\R", -1)));
-            while (!editorLines.isEmpty() && editorLines.get(editorLines.size() - 1).isEmpty()) {
-                editorLines.remove(editorLines.size() - 1);
-            }
+            lines.addAll(List.of(text.split("\\R", -1)));
+            while (!lines.isEmpty() && lines.get(lines.size() - 1).isEmpty()) lines.remove(lines.size() - 1);
         }
-        if (editorLines.isEmpty()) {
-            editorLines.add("");
-        }
-        editorLineOffset = Math.min(editorLineOffset, Math.max(0, editorLines.size() - VISIBLE_EDITOR_LINES));
-        refreshEditorInputs();
+        while (lines.size() < visibleEditorLines) lines.add("");
+        return lines;
     }
 
     private void syncEditorFromInputs() {
-        for (int i = 0; i < scriptLineInputs.size(); i++) {
-            int idx = editorLineOffset + i;
-            if (idx < editorLines.size()) {
-                editorLines.set(idx, scriptLineInputs.get(i).getValue());
-            }
-        }
-    }
-
-    private void refreshEditorInputs() {
-        for (int i = 0; i < scriptLineInputs.size(); i++) {
-            int idx = editorLineOffset + i;
-            scriptLineInputs.get(i).setValue(idx < editorLines.size() ? editorLines.get(idx) : "");
-        }
-    }
-
-    private void scrollEditor(int delta) {
-        syncEditorFromInputs();
-        int maxOffset = Math.max(0, editorLines.size() - VISIBLE_EDITOR_LINES);
-        editorLineOffset = Math.max(0, Math.min(maxOffset, editorLineOffset + delta));
-        refreshEditorInputs();
-    }
-
-    private void addEditorLine() {
-        syncEditorFromInputs();
-        editorLines.add("");
-        editorLineOffset = Math.max(0, editorLines.size() - VISIBLE_EDITOR_LINES);
-        refreshEditorInputs();
-        status = "Added editor line";
-    }
-
-    private void deleteTrailingBlankLine() {
-        syncEditorFromInputs();
-        if (editorLines.size() > 1 && editorLines.get(editorLines.size() - 1).isBlank()) {
-            editorLines.remove(editorLines.size() - 1);
-            editorLineOffset = Math.min(editorLineOffset, Math.max(0, editorLines.size() - VISIBLE_EDITOR_LINES));
-            refreshEditorInputs();
-            status = "Deleted trailing blank line";
-        } else {
-            status = "Last line is not blank";
-        }
-    }
-
-    private void clearEditor() {
-        editorLines.clear();
-        editorLines.add("");
-        editorLineOffset = 0;
-        refreshEditorInputs();
-        status = "Editor cleared";
+        // Editor state lives directly in the visible input widgets.
     }
 
     private void applyEditor() {
@@ -314,12 +347,8 @@ public class MacroManagerScreen extends Screen {
     }
 
     private void refreshToggleLabels() {
-        if (repeatBtn != null) {
-            repeatBtn.setMessage(Component.literal("Repeat: " + (engine.isRepeat() ? "ON" : "OFF")));
-        }
-        if (aimLockBtn != null) {
-            aimLockBtn.setMessage(Component.literal("AimLock: " + (engine.isAimLock() ? "ON" : "OFF")));
-        }
+        if (repeatBtn != null) repeatBtn.setMessage(Component.literal("Repeat: " + (engine.isRepeat() ? "ON" : "OFF")));
+        if (aimLockBtn != null) aimLockBtn.setMessage(Component.literal("AimLock: " + (engine.isAimLock() ? "ON" : "OFF")));
         if (toggleBindBtn != null) {
             String t = waitingBind == BindTarget.TOGGLE ? "Start/Pause: [Press key...]" : "Start/Pause: " + MacroModClient.getToggleKeyName();
             toggleBindBtn.setMessage(Component.literal(t));
@@ -348,28 +377,32 @@ public class MacroManagerScreen extends Screen {
     @Override
     public void extractBackground(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float delta) {
         graphics.fill(0, 0, this.width, this.height, 0xB0101010);
+        int margin = 18;
+        int leftWidth = Math.min(720, Math.max(520, this.width * 38 / 100));
+        int editorLeft = margin + leftWidth + 22;
+        int editorTop = 22;
+        int editorRight = this.width - margin;
+        int editorBottom = this.height - 52;
+        graphics.fill(editorLeft - 2, editorTop - 2, editorRight + 2, editorBottom + 2, 0xFFAAAAAA);
+        graphics.fill(editorLeft, editorTop, editorRight, editorBottom, 0xFF050505);
     }
 
     @Override
     public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float delta) {
         super.extractRenderState(graphics, mouseX, mouseY, delta);
+        int margin = 18;
+        int leftWidth = Math.min(720, Math.max(520, this.width * 38 / 100));
+        int editorLeft = margin + leftWidth + 22;
+        int editorTop = 22;
+        int editorRight = this.width - margin;
+        int editorBottom = this.height - 52;
 
-        int left = this.width / 2 - 180;
-        int y = 12;
-        graphics.text(this.font, this.title, left, y, 0xFFFFFF, false);
-        graphics.text(this.font, Component.literal("Script editor (same style as original manager):"), left, 124, 0xA0A0A0, false);
+        int count = editorScript().length();
+        graphics.text(this.font, Component.literal(count + "/" + MAX_SCRIPT_CHARS), editorRight - 92, editorBottom + 8, 0xD0D0D0, false);
 
-        int lineY = 164;
-        int lastLine = Math.min(editorLines.size(), editorLineOffset + VISIBLE_EDITOR_LINES);
-        for (int i = 0; i < VISIBLE_EDITOR_LINES; i++) {
-            int lineNo = editorLineOffset + i + 1;
-            graphics.text(this.font, Component.literal(String.format("%2d:", lineNo)), left, lineY + i * 18 + 4, 0x808080, false);
-        }
-        graphics.text(this.font, Component.literal("Lines " + (editorLineOffset + 1) + "-" + Math.max(editorLineOffset + 1, lastLine) + " / " + editorLines.size()), left + 210, 124, 0x808080, false);
-
-        y = this.height - 20;
         int color = status.toLowerCase().contains("failed") ? 0xFF6060 : 0x80FF80;
-        graphics.text(this.font, Component.literal(status), left, y, color, false);
+        graphics.text(this.font, Component.literal(status), margin, this.height - 20, color, false);
+        graphics.text(this.font, Component.literal("Page " + (scriptPage + 1) + "/" + Math.max(1, (scripts.size() + SCRIPT_ROWS - 1) / SCRIPT_ROWS)), margin + leftWidth - 90, this.height - 20, 0xD0D0D0, false);
     }
 
     @Override
