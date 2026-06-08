@@ -18,6 +18,7 @@ public class MacroManagerScreen extends Screen {
     private final MacroEngine engine;
     private final List<String> scripts = new ArrayList<>();
     private final List<EditBox> editorInputs = new ArrayList<>();
+    private final List<String> editorLines = new ArrayList<>();
 
     private int scriptIndex = 0;
     private int scriptPage = 0;
@@ -304,19 +305,13 @@ public class MacroManagerScreen extends Screen {
 
     private String editorScript() {
         syncEditorFromInputs();
-        return String.join("\n", visibleEditorLines()) .stripTrailing() + "\n";
-    }
-
-    private List<String> visibleEditorLines() {
-        List<String> out = new ArrayList<>();
-        for (int i = 0; i < visibleEditorLines; i++) {
-            out.add(i < editorInputs.size() ? editorInputs.get(i).getValue() : "");
-        }
-        return out;
+        return String.join("\n", editorLines).stripTrailing() + "\n";
     }
 
     private void setEditorScript(String script) {
+        editorLines.clear();
         List<String> lines = splitScript(script);
+        editorLines.addAll(lines);
         for (int i = 0; i < editorInputs.size(); i++) {
             editorInputs.get(i).setValue(i < lines.size() ? lines.get(i) : "");
         }
@@ -334,7 +329,10 @@ public class MacroManagerScreen extends Screen {
     }
 
     private void syncEditorFromInputs() {
-        // Editor state lives directly in the visible input widgets.
+        while (editorLines.size() < visibleEditorLines) editorLines.add("");
+        for (int i = 0; i < visibleEditorLines && i < editorInputs.size(); i++) {
+            editorLines.set(i, editorInputs.get(i).getValue());
+        }
     }
 
     private void applyEditor() {
@@ -401,6 +399,12 @@ public class MacroManagerScreen extends Screen {
         super.extractRenderState(graphics, mouseX, mouseY, delta);
 
         int count = editorScript().length();
+        for (int i = 0; i < visibleEditorLines && i < editorLines.size(); i++) {
+            String line = editorLines.get(i);
+            if (!line.isEmpty()) {
+                graphics.text(this.font, Component.literal(line), editorLeft + 8, editorTop + 8 + i * 14, 0xFFFFFF, true);
+            }
+        }
         graphics.text(this.font, Component.literal(count + "/" + MAX_SCRIPT_CHARS), editorRight - 92, editorBottom + 8, 0xD0D0D0, false);
 
         int color = status.toLowerCase().contains("failed") ? 0xFF6060 : 0x80FF80;
