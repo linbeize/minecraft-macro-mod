@@ -135,10 +135,11 @@ public class MacroManagerScreen extends Screen {
         for (int i = 0; i < visibleEditorLines; i++) {
             EditBox line = new EditBox(this.font, editorLeft + 6, editorTop + 6 + i * 14, editorWidth - 12, 12, Component.literal("script line"));
             line.setMaxLength(512);
-            line.setBordered(false);
+            line.setBordered(true);
             line.setTextColor(0xFFFFFF);
             line.setTextColorUneditable(0xFFFFFF);
             line.setTextShadow(true);
+            line.setCanLoseFocus(true);
             editorInputs.add(line);
             this.addRenderableWidget(line);
         }
@@ -400,7 +401,10 @@ public class MacroManagerScreen extends Screen {
         graphics.fill(editorLeft, editorTop, editorRight, editorBottom, 0xFF050505);
         super.extractRenderState(graphics, mouseX, mouseY, delta);
 
-        int count = editorScript().length();
+        int count = 0;
+        for (EditBox input : editorInputs) {
+            count += input.getValue().length() + 1;
+        }
         graphics.text(this.font, Component.literal(count + "/" + MAX_SCRIPT_CHARS), editorRight - 92, editorBottom + 8, 0xD0D0D0, false);
 
         int color = status.toLowerCase().contains("failed") ? 0xFF6060 : 0x80FF80;
