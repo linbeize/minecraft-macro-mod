@@ -4,7 +4,6 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
-import net.minecraft.client.gui.components.MultiLineEditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.network.chat.Component;
@@ -19,8 +18,12 @@ public class MacroManagerScreen extends Screen {
     private int scriptIndex = 0;
     private String status = "";
 
+    private static final int VISIBLE_EDITOR_LINES = 10;
+
     private EditBox nameInput;
-    private MultiLineEditBox scriptEditor;
+    private final List<EditBox> scriptLineInputs = new ArrayList<>();
+    private final List<String> editorLines = new ArrayList<>();
+    private int editorLineOffset = 0;
     private Button repeatBtn;
     private Button aimLockBtn;
     private Button toggleBindBtn;
@@ -37,6 +40,7 @@ public class MacroManagerScreen extends Screen {
         int left = this.width / 2 - 180;
         int editorWidth = 360;
         int y = 32;
+        scriptLineInputs.clear();
 
         refreshScripts();
 
@@ -106,17 +110,26 @@ public class MacroManagerScreen extends Screen {
                 .bounds(left, y, 170, 20).build());
 
         y += 30;
-        int editorHeight = Math.max(80, this.height - y - 34);
-        scriptEditor = MultiLineEditBox.builder()
-                .setX(left)
-                .setY(y)
-                .setPlaceholder(Component.literal("Write macro script here..."))
-                .setShowBackground(true)
-                .setShowDecorations(true)
-                .build(this.font, editorWidth, editorHeight, Component.literal("script editor"));
-        scriptEditor.setCharacterLimit(32768);
-        scriptEditor.setValue(engine.getScript());
-        this.addRenderableWidget(scriptEditor);
+        this.addRenderableWidget(Button.builder(Component.literal("Line Up"), b -> scrollEditor(-1))
+                .bounds(left, y, 70, 20).build());
+        this.addRenderableWidget(Button.builder(Component.literal("Line Down"), b -> scrollEditor(1))
+                .bounds(left + 75, y, 80, 20).build());
+        this.addRenderableWidget(Button.builder(Component.literal("Add Line"), b -> addEditorLine())
+                .bounds(left + 160, y, 75, 20).build());
+        this.addRenderableWidget(Button.builder(Component.literal("Del Blank"), b -> deleteTrailingBlankLine())
+                .bounds(left + 240, y, 80, 20).build());
+        this.addRenderableWidget(Button.builder(Component.literal("Clear"), b -> clearEditor())
+                .bounds(left + 325, y, 35, 20).build());
+
+        y += 24;
+        setEditorScript(engine.getScript());
+        for (int i = 0; i < VISIBLE_EDITOR_LINES; i++) {
+            EditBox line = new EditBox(this.font, left + 26, y + i * 18, editorWidth - 26, 16, Component.literal("script line"));
+            line.setMaxLength(512);
+            scriptLineInputs.add(line);
+            this.addRenderableWidget(line);
+        }
+        refreshEditorInputs();
 
         refreshToggleLabels();
     }
@@ -220,13 +233,75 @@ public class MacroManagerScreen extends Screen {
     }
 
     private String editorScript() {
-        return scriptEditor == null ? engine.getScript() : scriptEditor.getValue();
+        syncEditorFromInputs();
+        return String.join("\n", editorLines).stripTrailing() + "\n";
     }
 
     private void setEditorScript(String script) {
-        if (scriptEditor != null) {
-            scriptEditor.setValue(script == null ? "" : script);
+        editorLines.clear();
+        String text = script == null ? "" : script;
+        if (!text.isEmpty()) {
+            editorLines.addAll(List.of(text.split("\\R", -1)));
+            while (!editorLines.isEmpty() && editorLines.get(editorLines.size() - 1).isEmpty()) {
+                editorLines.remove(editorLines.size() - 1);
+            }
         }
+        if (editorLines.isEmpty()) {
+            editorLines.add("");
+        }
+        editorLineOffset = Math.min(editorLineOffset, Math.max(0, editorLines.size() - VISIBLE_EDITOR_LINES));
+        refreshEditorInputs();
+    }
+
+    private void syncEditorFromInputs() {
+        for (int i = 0; i < scriptLineInputs.size(); i++) {
+            int idx = editorLineOffset + i;
+            if (idx < editorLines.size()) {
+                editorLines.set(idx, scriptLineInputs.get(i).getValue());
+            }
+        }
+    }
+
+    private void refreshEditorInputs() {
+        for (int i = 0; i < scriptLineInputs.size(); i++) {
+            int idx = editorLineOffset + i;
+            scriptLineInputs.get(i).setValue(idx < editorLines.size() ? editorLines.get(idx) : "");
+        }
+    }
+
+    private void scrollEditor(int delta) {
+        syncEditorFromInputs();
+        int maxOffset = Math.max(0, editorLines.size() - VISIBLE_EDITOR_LINES);
+        editorLineOffset = Math.max(0, Math.min(maxOffset, editorLineOffset + delta));
+        refreshEditorInputs();
+    }
+
+    private void addEditorLine() {
+        syncEditorFromInputs();
+        editorLines.add("");
+        editorLineOffset = Math.max(0, editorLines.size() - VISIBLE_EDITOR_LINES);
+        refreshEditorInputs();
+        status = "Added editor line";
+    }
+
+    private void deleteTrailingBlankLine() {
+        syncEditorFromInputs();
+        if (editorLines.size() > 1 && editorLines.get(editorLines.size() - 1).isBlank()) {
+            editorLines.remove(editorLines.size() - 1);
+            editorLineOffset = Math.min(editorLineOffset, Math.max(0, editorLines.size() - VISIBLE_EDITOR_LINES));
+            refreshEditorInputs();
+            status = "Deleted trailing blank line";
+        } else {
+            status = "Last line is not blank";
+        }
+    }
+
+    private void clearEditor() {
+        editorLines.clear();
+        editorLines.add("");
+        editorLineOffset = 0;
+        refreshEditorInputs();
+        status = "Editor cleared";
     }
 
     private void applyEditor() {
@@ -258,11 +333,7 @@ public class MacroManagerScreen extends Screen {
     private void toggleRun() {
         try {
             if (!engine.isRunning()) {
-                if (scriptEditor != null) {
-                    engine.setScript(editorScript());
-                } else if (engine.getScript().isBlank()) {
-                    loadSelected();
-                }
+                engine.setScript(editorScript());
                 engine.start();
                 status = "Started";
             } else {
@@ -286,7 +357,15 @@ public class MacroManagerScreen extends Screen {
         int left = this.width / 2 - 180;
         int y = 12;
         graphics.text(this.font, this.title, left, y, 0xFFFFFF, false);
-        graphics.text(this.font, Component.literal("Edit script, then Apply or Save."), left, 124, 0xA0A0A0, false);
+        graphics.text(this.font, Component.literal("Script editor (same style as original manager):"), left, 124, 0xA0A0A0, false);
+
+        int lineY = 164;
+        int lastLine = Math.min(editorLines.size(), editorLineOffset + VISIBLE_EDITOR_LINES);
+        for (int i = 0; i < VISIBLE_EDITOR_LINES; i++) {
+            int lineNo = editorLineOffset + i + 1;
+            graphics.text(this.font, Component.literal(String.format("%2d:", lineNo)), left, lineY + i * 18 + 4, 0x808080, false);
+        }
+        graphics.text(this.font, Component.literal("Lines " + (editorLineOffset + 1) + "-" + Math.max(editorLineOffset + 1, lastLine) + " / " + editorLines.size()), left + 210, 124, 0x808080, false);
 
         y = this.height - 20;
         int color = status.toLowerCase().contains("failed") ? 0xFF6060 : 0x80FF80;
