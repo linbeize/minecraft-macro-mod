@@ -38,66 +38,66 @@ public class MacroManagerScreen extends Screen {
 
     @Override
     protected void init() {
-        int margin = 18;
+        int margin = 10;
         int left = margin;
-        int leftWidth = Math.min(720, Math.max(520, this.width * 38 / 100));
-        int editorLeft = left + leftWidth + 22;
+        int leftWidth = Math.min(430, Math.max(360, this.width * 34 / 100));
+        int editorLeft = left + leftWidth + 12;
         int editorWidth = Math.max(260, this.width - editorLeft - margin);
-        int top = 14;
-        int rowHeight = 38;
-        int rowGap = 10;
+        int top = 10;
+        int rowHeight = 20;
+        int rowGap = 5;
 
         editorInputs.clear();
         refreshScripts();
 
-        nameInput = new EditBox(this.font, left, top, Math.min(340, leftWidth - 360), rowHeight, Component.literal("script name"));
+        nameInput = new EditBox(this.font, left, top, Math.min(170, leftWidth - 230), rowHeight, Component.literal("script name"));
         nameInput.setMaxLength(64);
         if (!scripts.isEmpty()) nameInput.setValue(scripts.get(scriptIndex));
         this.addRenderableWidget(nameInput);
 
         int x = left + nameInput.getWidth() + 8;
         this.addRenderableWidget(Button.builder(Component.literal("新建"), b -> newTemplate())
-                .bounds(x, top, 82, rowHeight).build());
+                .bounds(x, top, 48, rowHeight).build());
         this.addRenderableWidget(Button.builder(Component.literal("刷新"), b -> {
                     refreshScripts();
                     this.rebuildWidgets();
                 })
-                .bounds(x + 90, top, 82, rowHeight).build());
+                .bounds(x + 54, top, 48, rowHeight).build());
         this.addRenderableWidget(Button.builder(Component.literal("上一页"), b -> stepScriptPage(-1))
-                .bounds(x + 180, top, 118, rowHeight).build());
+                .bounds(x + 108, top, 68, rowHeight).build());
         this.addRenderableWidget(Button.builder(Component.literal("下一页"), b -> stepScriptPage(1))
-                .bounds(x + 180, top + rowHeight + 8, 118, rowHeight).build());
+                .bounds(x + 108, top + rowHeight + 4, 68, rowHeight).build());
 
         int listTop = top + rowHeight + 24;
         for (int i = 0; i < SCRIPT_ROWS; i++) {
             int y = listTop + i * (rowHeight + rowGap);
             int row = i;
-            int nameWidth = Math.max(220, leftWidth - 402);
+            int nameWidth = Math.max(150, leftWidth - 226);
             this.addRenderableWidget(Button.builder(Component.literal(scriptNameForRow(row)), b -> selectRow(row))
                     .bounds(left, y, nameWidth, rowHeight).build());
             int bx = left + nameWidth + 8;
             this.addRenderableWidget(Button.builder(Component.literal("选"), b -> selectRow(row))
-                    .bounds(bx, y, 66, rowHeight).build());
+                    .bounds(bx, y, 36, rowHeight).build());
             this.addRenderableWidget(Button.builder(Component.literal("编"), b -> editRow(row))
-                    .bounds(bx + 76, y, 66, rowHeight).build());
+                    .bounds(bx + 42, y, 36, rowHeight).build());
             this.addRenderableWidget(Button.builder(Component.literal("复"), b -> copyRow(row))
-                    .bounds(bx + 152, y, 66, rowHeight).build());
+                    .bounds(bx + 84, y, 36, rowHeight).build());
             this.addRenderableWidget(Button.builder(Component.literal("删"), b -> deleteRow(row))
-                    .bounds(bx + 228, y, 66, rowHeight).build());
+                    .bounds(bx + 126, y, 36, rowHeight).build());
         }
 
         int controlsTop = listTop + SCRIPT_ROWS * (rowHeight + rowGap) + 8;
         this.addRenderableWidget(Button.builder(Component.literal("载入编辑器"), b -> loadSelected())
-                .bounds(left, controlsTop, 124, rowHeight).build());
+                .bounds(left, controlsTop, 82, rowHeight).build());
         this.addRenderableWidget(Button.builder(Component.literal("保存编辑器"), b -> saveCurrent())
-                .bounds(left + 134, controlsTop, 124, rowHeight).build());
+                .bounds(left + 88, controlsTop, 82, rowHeight).build());
         this.addRenderableWidget(Button.builder(Component.literal("Start/Pause"), b -> toggleRun())
-                .bounds(left + 268, controlsTop, 124, rowHeight).build());
+                .bounds(left + 176, controlsTop, 88, rowHeight).build());
         this.addRenderableWidget(Button.builder(Component.literal("Stop"), b -> {
                     engine.stop();
                     status = "Stopped";
                 })
-                .bounds(left + 402, controlsTop, 86, rowHeight).build());
+                .bounds(left + 270, controlsTop, 54, rowHeight).build());
 
         controlsTop += rowHeight + 10;
         repeatBtn = this.addRenderableWidget(Button.builder(Component.literal(""), b -> {
@@ -105,19 +105,19 @@ public class MacroManagerScreen extends Screen {
                     refreshToggleLabels();
                     status = "Repeat: " + (engine.isRepeat() ? "ON" : "OFF");
                 })
-                .bounds(left, controlsTop, 124, rowHeight).build());
+                .bounds(left, controlsTop, 82, rowHeight).build());
         aimLockBtn = this.addRenderableWidget(Button.builder(Component.literal(""), b -> {
                     engine.setAimLock(!engine.isAimLock());
                     refreshToggleLabels();
                     status = "Aim lock: " + (engine.isAimLock() ? "ON" : "OFF");
                 })
-                .bounds(left + 134, controlsTop, 124, rowHeight).build());
+                .bounds(left + 88, controlsTop, 92, rowHeight).build());
         toggleBindBtn = this.addRenderableWidget(Button.builder(Component.literal(""), b -> {
                     waitingBind = BindTarget.TOGGLE;
                     refreshToggleLabels();
                     status = "Press a key for Start/Pause hotkey...";
                 })
-                .bounds(left + 268, controlsTop, 174, rowHeight).build());
+                .bounds(left + 186, controlsTop, 134, rowHeight).build());
 
         controlsTop += rowHeight + 10;
         stopBindBtn = this.addRenderableWidget(Button.builder(Component.literal(""), b -> {
@@ -125,15 +125,15 @@ public class MacroManagerScreen extends Screen {
                     refreshToggleLabels();
                     status = "Press a key for Stop hotkey...";
                 })
-                .bounds(left, controlsTop, 174, rowHeight).build());
+                .bounds(left, controlsTop, 134, rowHeight).build());
         this.addRenderableWidget(Button.builder(Component.literal("关闭"), b -> onClose())
-                .bounds(left + 184, controlsTop, 86, rowHeight).build());
+                .bounds(left + 140, controlsTop, 54, rowHeight).build());
 
-        int editorTop = top + 8;
+        int editorTop = top;
         int editorBottom = this.height - 52;
-        visibleEditorLines = Math.max(1, (editorBottom - editorTop - 12) / 18);
+        visibleEditorLines = Math.max(1, (editorBottom - editorTop - 12) / 14);
         for (int i = 0; i < visibleEditorLines; i++) {
-            EditBox line = new EditBox(this.font, editorLeft + 8, editorTop + 6 + i * 18, editorWidth - 16, 16, Component.literal("script line"));
+            EditBox line = new EditBox(this.font, editorLeft + 6, editorTop + 6 + i * 14, editorWidth - 12, 12, Component.literal("script line"));
             line.setMaxLength(512);
             line.setBordered(false);
             line.setTextColor(0xFFFFFF);
@@ -377,10 +377,10 @@ public class MacroManagerScreen extends Screen {
     @Override
     public void extractBackground(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float delta) {
         graphics.fill(0, 0, this.width, this.height, 0xB0101010);
-        int margin = 18;
-        int leftWidth = Math.min(720, Math.max(520, this.width * 38 / 100));
-        int editorLeft = margin + leftWidth + 22;
-        int editorTop = 22;
+        int margin = 10;
+        int leftWidth = Math.min(430, Math.max(360, this.width * 34 / 100));
+        int editorLeft = margin + leftWidth + 12;
+        int editorTop = 10;
         int editorRight = this.width - margin;
         int editorBottom = this.height - 52;
         graphics.fill(editorLeft - 2, editorTop - 2, editorRight + 2, editorBottom + 2, 0xFFAAAAAA);
@@ -389,13 +389,16 @@ public class MacroManagerScreen extends Screen {
 
     @Override
     public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float delta) {
-        super.extractRenderState(graphics, mouseX, mouseY, delta);
-        int margin = 18;
-        int leftWidth = Math.min(720, Math.max(520, this.width * 38 / 100));
-        int editorLeft = margin + leftWidth + 22;
-        int editorTop = 22;
+        int margin = 10;
+        int leftWidth = Math.min(430, Math.max(360, this.width * 34 / 100));
+        int editorLeft = margin + leftWidth + 12;
+        int editorTop = 10;
         int editorRight = this.width - margin;
         int editorBottom = this.height - 52;
+
+        graphics.fill(editorLeft - 2, editorTop - 2, editorRight + 2, editorBottom + 2, 0xFFAAAAAA);
+        graphics.fill(editorLeft, editorTop, editorRight, editorBottom, 0xFF050505);
+        super.extractRenderState(graphics, mouseX, mouseY, delta);
 
         int count = editorScript().length();
         graphics.text(this.font, Component.literal(count + "/" + MAX_SCRIPT_CHARS), editorRight - 92, editorBottom + 8, 0xD0D0D0, false);
