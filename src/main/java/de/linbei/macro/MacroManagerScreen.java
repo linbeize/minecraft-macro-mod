@@ -100,7 +100,15 @@ public class MacroManagerScreen extends Screen {
         int editorTop = top;
         int editorBottom = this.height - 52;
         visibleEditorLines = Math.max(1, (editorBottom - editorTop - 14) / 14);
-        if (editorLines.isEmpty()) setEditorScript(engine.getScript());
+        if (editorLines.isEmpty()) {
+            try {
+                setEditorScript(MacroStorage.load(selectedName));
+                engine.setScript(editorScript());
+                status = "Loaded: " + selectedName + " (" + editorLines.size() + " lines)";
+            } catch (Exception e) {
+                setEditorScript(engine.getScript());
+            }
+        }
         clampCursor();
         refreshToggleLabels();
     }
@@ -130,7 +138,6 @@ public class MacroManagerScreen extends Screen {
         scriptIndex = idx;
         selectedName = scripts.get(scriptIndex);
         loadSelected();
-        this.rebuildWidgets();
     }
 
     private void copyRow(int row) {
@@ -201,7 +208,7 @@ public class MacroManagerScreen extends Screen {
             String script = MacroStorage.load(selectedName);
             setEditorScript(script);
             engine.setScript(script);
-            status = "Loaded: " + selectedName;
+            status = "Loaded: " + selectedName + " (" + editorLines.size() + " lines)";
         } catch (Exception e) { status = "Load failed: " + e.getMessage(); }
     }
 
@@ -387,7 +394,7 @@ public class MacroManagerScreen extends Screen {
             if (lineIndex >= editorLines.size()) break;
             String line = editorLines.get(lineIndex);
             int y = editorTop + 7 + i * 14;
-            graphics.text(this.font, Component.literal(line), editorLeft + 7, y, 0xFFFFFF, true);
+            graphics.text(this.font, line, editorLeft + 7, y, 0xFFFFFF, true);
             if (lineIndex == cursorLine && (System.currentTimeMillis() / 500) % 2 == 0) {
                 int cursorX = editorLeft + 7 + this.font.width(line.substring(0, Math.min(cursorCol, line.length())));
                 graphics.fill(cursorX, y - 1, cursorX + 1, y + 10, 0xFFFFFFFF);
