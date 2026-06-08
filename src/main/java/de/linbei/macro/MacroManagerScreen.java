@@ -4,6 +4,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.components.MultiLineEditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.network.chat.Component;
@@ -19,6 +20,7 @@ public class MacroManagerScreen extends Screen {
     private String status = "";
 
     private EditBox nameInput;
+    private MultiLineEditBox scriptEditor;
     private Button repeatBtn;
     private Button aimLockBtn;
     private Button toggleBindBtn;
@@ -32,12 +34,13 @@ public class MacroManagerScreen extends Screen {
 
     @Override
     protected void init() {
-        int left = this.width / 2 - 155;
+        int left = this.width / 2 - 180;
+        int editorWidth = 360;
         int y = 32;
 
         refreshScripts();
 
-        nameInput = new EditBox(this.font, left, y, 160, 20, Component.literal("script name"));
+        nameInput = new EditBox(this.font, left, y, 165, 20, Component.literal("script name"));
         nameInput.setMaxLength(64);
         if (!scripts.isEmpty()) nameInput.setValue(scripts.get(scriptIndex));
         this.addRenderableWidget(nameInput);
@@ -45,19 +48,21 @@ public class MacroManagerScreen extends Screen {
         this.addRenderableWidget(Button.builder(Component.literal("Refresh"), b -> refreshScripts())
                 .bounds(left + 170, y, 70, 20).build());
         this.addRenderableWidget(Button.builder(Component.literal("Prev"), b -> stepScript(-1))
-                .bounds(left + 245, y, 60, 20).build());
+                .bounds(left + 245, y, 55, 20).build());
+        this.addRenderableWidget(Button.builder(Component.literal("Next"), b -> stepScript(1))
+                .bounds(left + 305, y, 55, 20).build());
 
         y += 26;
-        this.addRenderableWidget(Button.builder(Component.literal("Next"), b -> stepScript(1))
-                .bounds(left, y, 60, 20).build());
         this.addRenderableWidget(Button.builder(Component.literal("Load"), b -> loadSelected())
-                .bounds(left + 65, y, 60, 20).build());
+                .bounds(left, y, 55, 20).build());
+        this.addRenderableWidget(Button.builder(Component.literal("Apply"), b -> applyEditor())
+                .bounds(left + 60, y, 55, 20).build());
         this.addRenderableWidget(Button.builder(Component.literal("Save"), b -> saveCurrent())
-                .bounds(left + 130, y, 60, 20).build());
+                .bounds(left + 120, y, 55, 20).build());
         this.addRenderableWidget(Button.builder(Component.literal("Delete"), b -> deleteSelected())
-                .bounds(left + 195, y, 60, 20).build());
+                .bounds(left + 180, y, 60, 20).build());
         this.addRenderableWidget(Button.builder(Component.literal("New Template"), b -> newTemplate())
-                .bounds(left + 260, y, 95, 20).build());
+                .bounds(left + 245, y, 115, 20).build());
 
         y += 30;
         this.addRenderableWidget(Button.builder(Component.literal("Start / Pause"), b -> toggleRun())
@@ -75,7 +80,7 @@ public class MacroManagerScreen extends Screen {
                     refreshToggleLabels();
                     status = "Repeat: " + (engine.isRepeat() ? "ON" : "OFF");
                 })
-                .bounds(left + 245, y, 110, 20).build());
+                .bounds(left + 250, y, 110, 20).build());
 
         y += 26;
         aimLockBtn = this.addRenderableWidget(Button.builder(Component.literal(""), b -> {
@@ -99,6 +104,19 @@ public class MacroManagerScreen extends Screen {
                     status = "Press a key for Stop hotkey...";
                 })
                 .bounds(left, y, 170, 20).build());
+
+        y += 30;
+        int editorHeight = Math.max(80, this.height - y - 34);
+        scriptEditor = MultiLineEditBox.builder()
+                .setX(left)
+                .setY(y)
+                .setPlaceholder(Component.literal("Write macro script here..."))
+                .setShowBackground(true)
+                .setShowDecorations(true)
+                .build(this.font, editorWidth, editorHeight, Component.literal("script editor"));
+        scriptEditor.setCharacterLimit(32768);
+        scriptEditor.setValue(engine.getScript());
+        this.addRenderableWidget(scriptEditor);
 
         refreshToggleLabels();
     }
@@ -142,7 +160,9 @@ public class MacroManagerScreen extends Screen {
             return;
         }
         try {
-            engine.setScript(MacroStorage.load(name));
+            String script = MacroStorage.load(name);
+            setEditorScript(script);
+            engine.setScript(script);
             status = "Loaded: " + name;
         } catch (Exception e) {
             status = "Load failed: " + e.getMessage();
@@ -156,7 +176,9 @@ public class MacroManagerScreen extends Screen {
             return;
         }
         try {
-            MacroStorage.save(name, engine.getScript());
+            String script = editorScript();
+            engine.setScript(script);
+            MacroStorage.save(name, script);
             refreshScripts();
             status = "Saved: " + name;
         } catch (Exception e) {
@@ -187,12 +209,32 @@ public class MacroManagerScreen extends Screen {
         }
         String tpl = "LeftDown\nFor 3\nKeyDown \"W\"\nDelay 1200\nKeyUp \"W\"\nDelay 200\nKeyPress \"Num 2\"\nDelay 500\nNext\nLeftUp\n";
         try {
-            MacroStorage.save(name, tpl);
+            setEditorScript(tpl);
             engine.setScript(tpl);
+            MacroStorage.save(name, tpl);
             refreshScripts();
             status = "Template created: " + name;
         } catch (Exception e) {
             status = "Template failed: " + e.getMessage();
+        }
+    }
+
+    private String editorScript() {
+        return scriptEditor == null ? engine.getScript() : scriptEditor.getValue();
+    }
+
+    private void setEditorScript(String script) {
+        if (scriptEditor != null) {
+            scriptEditor.setValue(script == null ? "" : script);
+        }
+    }
+
+    private void applyEditor() {
+        try {
+            engine.setScript(editorScript());
+            status = "Applied editor script";
+        } catch (Exception e) {
+            status = "Parse failed: " + e.getMessage();
         }
     }
 
@@ -216,7 +258,9 @@ public class MacroManagerScreen extends Screen {
     private void toggleRun() {
         try {
             if (!engine.isRunning()) {
-                if (engine.getScript().isBlank()) {
+                if (scriptEditor != null) {
+                    engine.setScript(editorScript());
+                } else if (engine.getScript().isBlank()) {
                     loadSelected();
                 }
                 engine.start();
@@ -239,30 +283,10 @@ public class MacroManagerScreen extends Screen {
     public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float delta) {
         super.extractRenderState(graphics, mouseX, mouseY, delta);
 
-        int left = this.width / 2 - 155;
+        int left = this.width / 2 - 180;
         int y = 12;
         graphics.text(this.font, this.title, left, y, 0xFFFFFF, false);
-        y += 90;
-
-        graphics.text(this.font, Component.literal("Current script in memory:"), left, y, 0xA0A0A0, false);
-        y += 12;
-
-        String script = engine.getScript();
-        if (script == null || script.isBlank()) {
-            graphics.text(this.font, Component.literal("(empty)"), left, y, 0x808080, false);
-            y += 12;
-        } else {
-            String[] ls = script.split("\\R");
-            int max = Math.min(ls.length, 10);
-            for (int i = 0; i < max; i++) {
-                graphics.text(this.font, Component.literal((i + 1) + ": " + ls[i]), left, y, 0xD0D0D0, false);
-                y += 10;
-            }
-            if (ls.length > max) {
-                graphics.text(this.font, Component.literal("...(" + (ls.length - max) + " more lines)"), left, y, 0x808080, false);
-                y += 10;
-            }
-        }
+        graphics.text(this.font, Component.literal("Edit script, then Apply or Save."), left, 124, 0xA0A0A0, false);
 
         y = this.height - 20;
         int color = status.toLowerCase().contains("failed") ? 0xFF6060 : 0x80FF80;
