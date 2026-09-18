@@ -1,14 +1,14 @@
 package de.linbei.macro;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.option.KeyBinding;
+import net.minecraft.client.KeyMapping;
+import net.minecraft.client.Minecraft;
 
 import java.util.*;
 
 public class MacroEngine {
     private final List<MacroInstruction> program = new ArrayList<>();
     private final Deque<LoopFrame> loopStack = new ArrayDeque<>();
-    private final Set<KeyBinding> held = new HashSet<>();
+    private final Set<KeyMapping> held = new HashSet<>();
 
     private String script = "";
     private int pc = 0;
@@ -68,11 +68,14 @@ public class MacroEngine {
     public void tick() {
         if (!running || paused) return;
 
+        Minecraft client = Minecraft.getInstance();
+        if (client == null) return;
+
         if (aimLock) {
             enforceAimLock();
         }
         if (leftMouseHeld) {
-            MinecraftClient.getInstance().options.attackKey.setPressed(true);
+            client.options.keyAttack.setDown(true);
         }
 
         long now = System.currentTimeMillis();
@@ -91,37 +94,37 @@ public class MacroEngine {
         MacroInstruction ins = program.get(pc);
         switch (ins.type()) {
             case KEY_DOWN -> {
-                KeyBinding kb = KeyMapper.resolve(ins.arg());
+                KeyMapping kb = KeyMapper.resolve(ins.arg());
                 if (kb != null) {
-                    kb.setPressed(true);
+                    kb.setDown(true);
                     held.add(kb);
                 }
                 pc++;
             }
             case KEY_UP -> {
-                KeyBinding kb = KeyMapper.resolve(ins.arg());
+                KeyMapping kb = KeyMapper.resolve(ins.arg());
                 if (kb != null) {
-                    kb.setPressed(false);
+                    kb.setDown(false);
                     held.remove(kb);
                 }
                 pc++;
             }
             case KEY_PRESS -> {
-                KeyBinding kb = KeyMapper.resolve(ins.arg());
+                KeyMapping kb = KeyMapper.resolve(ins.arg());
                 if (kb != null) {
-                    kb.setPressed(true);
-                    kb.setPressed(false);
+                    kb.setDown(true);
+                    kb.setDown(false);
                 }
                 pc++;
             }
             case LEFT_DOWN -> {
                 leftMouseHeld = true;
-                MinecraftClient.getInstance().options.attackKey.setPressed(true);
+                client.options.keyAttack.setDown(true);
                 pc++;
             }
             case LEFT_UP -> {
                 leftMouseHeld = false;
-                MinecraftClient.getInstance().options.attackKey.setPressed(false);
+                client.options.keyAttack.setDown(false);
                 pc++;
             }
             case DELAY -> {
@@ -155,26 +158,29 @@ public class MacroEngine {
     }
 
     private void captureAim() {
-        MinecraftClient client = MinecraftClient.getInstance();
+        Minecraft client = Minecraft.getInstance();
         if (client.player != null) {
-            lockedYaw = client.player.getYaw();
-            lockedPitch = client.player.getPitch();
+            lockedYaw = client.player.getYRot();
+            lockedPitch = client.player.getXRot();
         }
     }
 
     private void enforceAimLock() {
-        MinecraftClient client = MinecraftClient.getInstance();
+        Minecraft client = Minecraft.getInstance();
         if (client.player != null) {
-            client.player.setYaw(lockedYaw);
-            client.player.setPitch(lockedPitch);
+            client.player.setYRot(lockedYaw);
+            client.player.setXRot(lockedPitch);
         }
     }
 
     private void releaseAll() {
-        for (KeyBinding kb : held) kb.setPressed(false);
+        for (KeyMapping kb : held) kb.setDown(false);
         held.clear();
         leftMouseHeld = false;
-        MinecraftClient.getInstance().options.attackKey.setPressed(false);
+        Minecraft client = Minecraft.getInstance();
+        if (client != null) {
+            client.options.keyAttack.setDown(false);
+        }
     }
 
     private void resetRuntime() {

@@ -1,6 +1,6 @@
-# Client Utilities (Fabric 1.21.11)
+# Client Utilities (Fabric 26.1)
 
-一个用于 Minecraft Fabric **1.21.11** 的客户端宏模组，支持脚本循环、导入导出、GUI 管理与热键控制。
+一个用于 Minecraft Fabric **26.1** 的客户端宏模组，支持脚本循环、导入导出、GUI 管理与热键控制。
 
 ## 功能
 
@@ -18,6 +18,8 @@
 - 世界/地图切换时自动停止脚本
 - GUI 管理（`/mmacro gui`）：
   - 脚本列表刷新、切换、加载、保存、删除
+  - 内置脚本编辑器，可直接逐行编辑脚本内容
+  - `Apply` 将编辑器内容应用到内存，`Save` 校验并保存到脚本文件
   - 一键模板创建
   - Start/Pause / Stop
   - Repeat / AimLock 开关
@@ -46,7 +48,7 @@
 gradle build
 ```
 
-产物：`build/libs/client-utilities-0.1.0.jar`
+产物：`build/libs/client-utilities-0.2.0.jar`
 
 ## 说明
 
