@@ -1,0 +1,12 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "de.linbei.macro.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "client": [
+    "EntityTurnMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
