@@ -1,34 +1,63 @@
 plugins {
     id 'net.fabricmc.fabric-loom' version "${loom_version}"
-    id 'maven-publish'
 }
 
-version = project.mod_version
+// One jar per Minecraft version. Shared code is in src/main; the few APIs that differ
+// between versions are in src/compat/<compat>/java (class de.linbei.macro.compat.Compat).
+//   gradle build -Pmc=26.1 | 26.2 | 26.3
+def targets = [
+        '26.1': [fabric: '0.145.1+26.1', loader: '0.19.2', minLoader: '0.19.2', compat: 'mc26_1'],
+        '26.2': [fabric: '0.161.0+26.2', loader: '0.19.2', minLoader: '0.18.4', compat: 'mc26_2'],
+        '26.3': [fabric: '0.165.0+26.3', loader: '0.20.1', minLoader: '0.19.3', compat: 'mc26_3'],
+]
+def mc = project.property('mc').toString()
+def target = targets[mc]
+if (target == null) {
+    throw new GradleException("Unsupported -Pmc=${mc}. Supported: ${targets.keySet().join(', ')}")
+}
+
+version = "${project.mod_version}+mc${mc}"
 group = project.maven_group
 
 base {
     archivesName = project.archives_base_name
 }
 
-repositories {
+sourceSets {
+    main {
+        java {
+            srcDir "src/compat/${target.compat}/java"
+        }
+    }
 }
 
 dependencies {
-    minecraft "com.mojang:minecraft:${project.minecraft_version}"
-    implementation "net.fabricmc:fabric-loader:${project.loader_version}"
-    implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
-    include "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+    minecraft "com.mojang:minecraft:${mc}"
+    implementation "net.fabricmc:fabric-loader:${target.loader}"
+    // Fabric API is a declared dependency (see fabric.mod.json), not bundled:
+    // bundling the whole API bloats the jar and can clash with the player's own copy.
+    implementation "net.fabricmc.fabric-api:fabric-api:${target.fabric}"
+
+    testImplementation platform("org.junit:junit-bom:5.13.4")
+    testImplementation "org.junit.jupiter:junit-jupiter"
+    testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+}
+
+test {
+    useJUnitPlatform()
 }
 
 processResources {
-    inputs.property "version", project.version
+    def props = [version: project.version, minecraft: "~${mc}", min_loader: ">=${target.minLoader}"]
+    inputs.properties props
     filesMatching("fabric.mod.json") {
-        expand "version": inputs.properties.version
+        expand props
     }
 }
 
 tasks.withType(JavaCompile).configureEach {
     it.options.release = 25
+    it.options.encoding = "UTF-8"
 }
 
 java {

@@ -1,439 +1,744 @@
 package de.linbei.macro;
 
-import net.minecraft.client.Minecraft;
+import com.mojang.blaze3d.platform.InputConstants;
+import net.minecraft.ChatFormatting;
+import net.minecraft.client.KeyMapping;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.components.MultiLineEditBox;
+import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.network.chat.Component;
-import org.lwjgl.glfw.GLFW;
+import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.util.Mth;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
+import java.util.Objects;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
 
+/**
+ * Script manager.
+ *
+ * <pre>
+ * Macro Manager                               ▶ Running · farm · line 5 · wait 12.3s
+ * ┌ Scripts (3) ──┐ Name [farm______] [Save] [Rename] [Revert]
+ * │ ▶ farm *      │ ┌──────────────────────────────────────────┐
+ * │   example     │ │ editor (SafeTextArea, or vanilla w/ IME)  │
+ * │   macro_2     │ └──────────────────────────────────────────┘
+ * │[New][Copy][Del]│ ✔ OK: 12 instructions             ● Unsaved
+ * status message
+ * [▶ Start][■ Stop][Repeat][Aim lock][HUD][Start/Pause key][Stop key][?][Done]
+ * </pre>
+ *
+ * The draft (text, file name, typed name) is static so closing the screen never loses edits.
+ * When the macro is stopped, the engine follows the draft on close, so the hotkey runs what
+ * the user last saw in the editor.
+ */
 public class MacroManagerScreen extends Screen {
-    private static final int SCRIPT_ROWS = 8;
-    private static final int MAX_SCRIPT_CHARS = 200000;
+    private static final int MARGIN = 6;
+    private static final int ROW_H = 20;
+    private static final int GAP = 4;
+    private static final int TITLE_H = 20;
+    private static final int MAX_SCRIPT_CHARS = 200_000;
+    private static final long CONFIRM_MS = 4_000;
+    private static final long MESSAGE_MS = 8_000;
 
-    private final MacroEngine engine;
+    private static final int COLOR_TEXT = 0xFFE0E0E0;
+    private static final int COLOR_DIM = 0xFF909090;
+    private static final int COLOR_OK = 0xFF60E060;
+    private static final int COLOR_WARN = 0xFFFFD040;
+    private static final int COLOR_ERR = 0xFFFF6060;
+
+    private static final String NEW_TEMPLATE = """
+            # New macro. Hover the "?" button for help.
+            KeyDown "W"
+            Delay 1000
+            KeyUp "W"
+            """;
+
+    // ---- draft state, kept across openings of the screen
+    private static String draftText;
+    private static String draftName;      // file the draft belongs to; null = never saved
+    private static String savedText;      // file content at load/save time, for the dirty check
+    private static String draftNameInput; // what is typed in the name box
+    private static int listScroll;
+
+    private final MacroEngine engine = MacroModClient.ENGINE;
     private final List<String> scripts = new ArrayList<>();
-    private final List<String> editorLines = new ArrayList<>();
+    private final List<Button> rowButtons = new ArrayList<>();
 
-    private int scriptIndex = 0;
-    private int scriptPage = 0;
-    private int scrollLine = 0;
-    private int cursorLine = 0;
-    private int cursorCol = 0;
-    private int visibleEditorLines = 1;
-    private String selectedName = "example";
-    private String status = "";
-
+    // Either vanilla widgets (IME on) or SafeTextArea (default), see settings.imeEditor.
+    private AbstractWidget editorWidget;
+    private Consumer<String> editorSetter;
+    private AbstractWidget nameWidget;
+    private Supplier<String> nameGetter;
+    private Consumer<String> nameSetter;
+    private Button imeBtn;
+    private Button runBtn;
+    private Button stopBtn;
     private Button repeatBtn;
-    private Button aimLockBtn;
+    private Button aimBtn;
+    private Button hudBtn;
     private Button toggleBindBtn;
     private Button stopBindBtn;
+    private Button copyBtn;
+    private Button deleteBtn;
+    private Button renameBtn;
+    private Button revertBtn;
     private BindTarget waitingBind = BindTarget.NONE;
 
-    public MacroManagerScreen(MacroEngine engine) {
-        super(Component.literal("Macro Manager"));
-        this.engine = engine;
+    private boolean valid = true;
+    private Component validation = Component.empty();
+    private Component message = Component.empty();
+    private int messageColor = COLOR_TEXT;
+    private long messageTime;
+    private String pendingConfirm;
+    private long pendingUntil;
+
+    // layout, computed in init()
+    private int leftX;
+    private int leftW;
+    private int rightX;
+    private int rightW;
+    private int top;
+    private int listTop;
+    private int listRows;
+    private int contentBottom;
+    private int barTop;
+
+    public MacroManagerScreen() {
+        super(Component.translatable("macro_mod.gui.title"));
     }
+
+    // ================================================================== layout
 
     @Override
     protected void init() {
-        int margin = 10;
-        int left = margin;
-        int leftWidth = Math.min(430, Math.max(360, this.width * 34 / 100));
-        int editorLeft = left + leftWidth + 12;
-        int top = 10;
-        int rowHeight = 20;
-        int rowGap = 5;
-
-        refreshScripts();
-
-        this.addRenderableWidget(Button.builder(Component.literal(selectedName), b -> loadSelected())
-                .bounds(left, top, Math.min(170, leftWidth - 230), rowHeight).build());
-
-        int x = left + Math.min(170, leftWidth - 230) + 8;
-        this.addRenderableWidget(Button.builder(Component.literal("新建"), b -> newTemplate()).bounds(x, top, 48, rowHeight).build());
-        this.addRenderableWidget(Button.builder(Component.literal("刷新"), b -> { refreshScripts(); this.rebuildWidgets(); }).bounds(x + 54, top, 48, rowHeight).build());
-        this.addRenderableWidget(Button.builder(Component.literal("上一页"), b -> stepScriptPage(-1)).bounds(x + 108, top, 68, rowHeight).build());
-        this.addRenderableWidget(Button.builder(Component.literal("下一页"), b -> stepScriptPage(1)).bounds(x + 108, top + rowHeight + 4, 68, rowHeight).build());
-
-        int listTop = top + rowHeight + 24;
-        for (int i = 0; i < SCRIPT_ROWS; i++) {
-            int y = listTop + i * (rowHeight + rowGap);
-            int row = i;
-            int nameWidth = Math.max(150, leftWidth - 226);
-            this.addRenderableWidget(Button.builder(Component.literal(scriptNameForRow(row)), b -> selectRow(row)).bounds(left, y, nameWidth, rowHeight).build());
-            int bx = left + nameWidth + 8;
-            this.addRenderableWidget(Button.builder(Component.literal("选"), b -> selectRow(row)).bounds(bx, y, 36, rowHeight).build());
-            this.addRenderableWidget(Button.builder(Component.literal("编"), b -> editRow(row)).bounds(bx + 42, y, 36, rowHeight).build());
-            this.addRenderableWidget(Button.builder(Component.literal("复"), b -> copyRow(row)).bounds(bx + 84, y, 36, rowHeight).build());
-            this.addRenderableWidget(Button.builder(Component.literal("删"), b -> deleteRow(row)).bounds(bx + 126, y, 36, rowHeight).build());
+        refreshScriptList();
+        if (draftText == null || (!isDirty() && !Objects.equals(draftName, engine.getScriptName()))) {
+            loadDraftFromEngine();
         }
 
-        int controlsTop = listTop + SCRIPT_ROWS * (rowHeight + rowGap) + 8;
-        this.addRenderableWidget(Button.builder(Component.literal("载入编辑器"), b -> loadSelected()).bounds(left, controlsTop, 82, rowHeight).build());
-        this.addRenderableWidget(Button.builder(Component.literal("保存编辑器"), b -> saveCurrent()).bounds(left + 88, controlsTop, 82, rowHeight).build());
-        this.addRenderableWidget(Button.builder(Component.literal("Start/Pause"), b -> toggleRun()).bounds(left + 176, controlsTop, 88, rowHeight).build());
-        this.addRenderableWidget(Button.builder(Component.literal("Stop"), b -> { engine.stop(); status = "Stopped"; }).bounds(left + 270, controlsTop, 54, rowHeight).build());
+        leftW = Mth.clamp(this.width / 4, 110, 170);
+        leftX = MARGIN;
+        rightX = leftX + leftW + 10;
+        rightW = this.width - rightX - MARGIN;
+        top = TITLE_H;
 
-        controlsTop += rowHeight + 10;
-        repeatBtn = this.addRenderableWidget(Button.builder(Component.literal(""), b -> {
-            engine.setRepeat(!engine.isRepeat()); refreshToggleLabels(); status = "Repeat: " + (engine.isRepeat() ? "ON" : "OFF");
-        }).bounds(left, controlsTop, 82, rowHeight).build());
-        aimLockBtn = this.addRenderableWidget(Button.builder(Component.literal(""), b -> {
-            engine.setAimLock(!engine.isAimLock()); refreshToggleLabels(); status = "Aim lock: " + (engine.isAimLock() ? "ON" : "OFF");
-        }).bounds(left + 88, controlsTop, 92, rowHeight).build());
-        toggleBindBtn = this.addRenderableWidget(Button.builder(Component.literal(""), b -> {
-            waitingBind = BindTarget.TOGGLE; refreshToggleLabels(); status = "Press a key for Start/Pause hotkey...";
-        }).bounds(left + 186, controlsTop, 134, rowHeight).build());
+        // ---- bottom bar (wraps to more rows on narrow screens)
+        // Dynamic labels (on/off, key names) are filled in by refreshLabels(); widths fit the longest variant.
+        runBtn = button(fit(60, Component.translatable("macro_mod.gui.start"), Component.translatable("macro_mod.gui.pause"),
+                Component.translatable("macro_mod.gui.resume")), "macro_mod.gui.start.tooltip", b -> onRun());
+        stopBtn = button(fit(40, Component.translatable("macro_mod.gui.stop")), null,
+                b -> say(MacroModClient.stop(), COLOR_TEXT));
+        repeatBtn = button(fit(60, Component.translatable("macro_mod.gui.repeat", MacroModClient.onOff(false))),
+                "macro_mod.gui.repeat.tooltip", b -> say(MacroModClient.setRepeat(!engine.isRepeat()), COLOR_TEXT));
+        aimBtn = button(fit(60, Component.translatable("macro_mod.gui.aimlock", MacroModClient.onOff(false))),
+                "macro_mod.gui.aimlock.tooltip", b -> say(MacroModClient.setAimLock(!engine.isAimLock()), COLOR_TEXT));
+        hudBtn = button(fit(50, Component.translatable("macro_mod.gui.hud", MacroModClient.onOff(false))),
+                "macro_mod.gui.hud.tooltip", b -> say(MacroModClient.setShowHud(!MacroModClient.settings().showHud), COLOR_TEXT));
+        toggleBindBtn = button(fit(90, Component.translatable("macro_mod.gui.bind_toggle", "Right Shift")),
+                "macro_mod.gui.bind.tooltip", b -> startBind(BindTarget.TOGGLE));
+        stopBindBtn = button(fit(70, Component.translatable("macro_mod.gui.bind_stop", "Right Shift")),
+                "macro_mod.gui.bind.tooltip", b -> startBind(BindTarget.STOP));
+        imeBtn = button(fit(50, Component.translatable("macro_mod.gui.ime", MacroModClient.onOff(false))),
+                "macro_mod.gui.ime.tooltip", b -> toggleIme());
+        Button help = button(20, "macro_mod.gui.help", b -> {});
+        help.setMessage(Component.literal("?"));
+        Button done = button(fit(50, Component.translatable("gui.done")), null, b -> onClose());
+        done.setMessage(Component.translatable("gui.done"));
+        List<AbstractWidget> bar = List.of(runBtn, stopBtn, repeatBtn, aimBtn, hudBtn, toggleBindBtn, stopBindBtn, imeBtn, help, done);
+        barTop = flowLayout(bar);
+        bar.forEach(this::addRenderableWidget);
+        contentBottom = barTop - 14;
 
-        controlsTop += rowHeight + 10;
-        stopBindBtn = this.addRenderableWidget(Button.builder(Component.literal(""), b -> {
-            waitingBind = BindTarget.STOP; refreshToggleLabels(); status = "Press a key for Stop hotkey...";
-        }).bounds(left, controlsTop, 134, rowHeight).build());
-        this.addRenderableWidget(Button.builder(Component.literal("关闭"), b -> onClose()).bounds(left + 140, controlsTop, 54, rowHeight).build());
+        // ---- left: script list
+        listTop = top + 14;
+        int actionY = contentBottom - ROW_H;
+        listRows = Math.max(1, (actionY - GAP - listTop + 2) / (ROW_H + 2));
+        rowButtons.clear();
+        for (int i = 0; i < listRows; i++) {
+            final int row = i;
+            Button b = Button.builder(Component.empty(), x -> onRowClicked(row))
+                    .bounds(leftX, listTop + i * (ROW_H + 2), leftW, ROW_H).build();
+            rowButtons.add(addRenderableWidget(b));
+        }
+        int aw = (leftW - 2 * GAP) / 3;
+        addRenderableWidget(Button.builder(Component.translatable("macro_mod.gui.new"), b -> newScript())
+                .bounds(leftX, actionY, aw, ROW_H)
+                .tooltip(Tooltip.create(Component.translatable("macro_mod.gui.new.tooltip"))).build());
+        copyBtn = addRenderableWidget(Button.builder(Component.translatable("macro_mod.gui.copy"), b -> copyScript())
+                .bounds(leftX + aw + GAP, actionY, aw, ROW_H)
+                .tooltip(Tooltip.create(Component.translatable("macro_mod.gui.copy.tooltip"))).build());
+        deleteBtn = addRenderableWidget(Button.builder(Component.translatable("macro_mod.gui.delete"), b -> deleteScript())
+                .bounds(leftX + 2 * (aw + GAP), actionY, leftW - 2 * (aw + GAP), ROW_H)
+                .tooltip(Tooltip.create(Component.translatable("macro_mod.gui.delete.tooltip"))).build());
 
-        int editorTop = top;
-        int editorBottom = this.height - 52;
-        visibleEditorLines = Math.max(1, (editorBottom - editorTop - 14) / 14);
-        if (editorLines.isEmpty()) {
+        // ---- right: name row
+        int labelW = this.font.width(Component.translatable("macro_mod.gui.name")) + 6;
+        int bw = fit(40, Component.translatable("macro_mod.gui.save"), Component.translatable("macro_mod.gui.rename"),
+                Component.translatable("macro_mod.gui.revert"));
+        int nameW = Math.max(50, rightW - labelW - 3 * (bw + GAP));
+        boolean ime = MacroModClient.settings().imeEditor;
+        Component nameLabel = Component.translatable("macro_mod.gui.name");
+        Component nameHint = Component.translatable("macro_mod.gui.name.hint").withStyle(ChatFormatting.DARK_GRAY);
+        if (ime) {
+            EditBox box = new EditBox(this.font, rightX + labelW, top, nameW, ROW_H, nameLabel);
+            box.setMaxLength(48);
+            box.setHint(nameHint);
+            box.setResponder(v -> draftNameInput = v);
+            nameWidget = box;
+            nameGetter = box::getValue;
+            nameSetter = box::setValue;
+        } else {
+            SafeTextArea box = new SafeTextArea(this.font, rightX + labelW, top, nameW, ROW_H, nameLabel, false);
+            box.setMaxChars(48);
+            box.setPlaceholder(nameHint);
+            box.setValueListener(v -> draftNameInput = v);
+            nameWidget = box;
+            nameGetter = box::getValue;
+            nameSetter = box::setValue;
+        }
+        nameSetter.accept(draftNameInput == null ? "" : draftNameInput);
+        nameWidget.setTooltip(Tooltip.create(Component.translatable("macro_mod.gui.name.tooltip")));
+        addRenderableWidget(nameWidget);
+        int bx = nameWidget.getRight() + GAP;
+        addRenderableWidget(Button.builder(Component.translatable("macro_mod.gui.save"), b -> save())
+                .bounds(bx, top, bw, ROW_H).tooltip(Tooltip.create(Component.translatable("macro_mod.gui.save.tooltip"))).build());
+        renameBtn = addRenderableWidget(Button.builder(Component.translatable("macro_mod.gui.rename"), b -> rename())
+                .bounds(bx + bw + GAP, top, bw, ROW_H).tooltip(Tooltip.create(Component.translatable("macro_mod.gui.rename.tooltip"))).build());
+        revertBtn = addRenderableWidget(Button.builder(Component.translatable("macro_mod.gui.revert"), b -> revert())
+                .bounds(bx + 2 * (bw + GAP), top, bw, ROW_H).tooltip(Tooltip.create(Component.translatable("macro_mod.gui.revert.tooltip"))).build());
+
+        // ---- right: editor
+        int edTop = top + ROW_H + GAP;
+        int edH = Math.max(30, contentBottom - 12 - edTop);
+        Component edLabel = Component.translatable("macro_mod.gui.editor");
+        Component edPlaceholder = Component.translatable("macro_mod.gui.editor.placeholder");
+        if (ime) {
+            // Vanilla editor: IME / Chinese input, selection, undo. Enables OS text input when focused.
+            MultiLineEditBox box = MultiLineEditBox.builder().setX(rightX).setY(edTop).setPlaceholder(edPlaceholder)
+                    .build(this.font, rightW, edH, edLabel);
+            box.setCharacterLimit(MAX_SCRIPT_CHARS);
+            box.setValue(draftText);
+            box.setValueListener(this::onEditorChanged);
+            editorWidget = box;
+            editorSetter = box::setValue;
+        } else {
+            // Default: never enables IME text input (it crashed some clients, e.g. Lunar).
+            SafeTextArea box = new SafeTextArea(this.font, rightX, edTop, rightW, edH, edLabel, true);
+            box.setMaxChars(MAX_SCRIPT_CHARS);
+            box.setPlaceholder(edPlaceholder);
+            box.setValue(draftText);
+            box.setValueListener(this::onEditorChanged);
+            editorWidget = box;
+            editorSetter = box::setValue;
+        }
+        addRenderableWidget(editorWidget);
+        setInitialFocus(editorWidget);
+
+        validate();
+        clampListScroll();
+        refreshListButtons();
+        refreshLabels();
+    }
+
+    private Button button(int width, String tooltipKey, Button.OnPress press) {
+        Button.Builder b = Button.builder(Component.empty(), press).size(width, ROW_H);
+        if (tooltipKey != null) b.tooltip(Tooltip.create(Component.translatable(tooltipKey)));
+        return b.build();
+    }
+
+    /** Width that fits the widest of the given labels. */
+    private int fit(int min, Component... labels) {
+        int w = min;
+        for (Component c : labels) w = Math.max(w, this.font.width(c) + 12);
+        return w;
+    }
+
+    /** Places widgets left-to-right from the bottom of the screen, wrapping as needed. Returns the top y. */
+    private int flowLayout(List<AbstractWidget> widgets) {
+        int avail = this.width - 2 * MARGIN;
+        List<List<AbstractWidget>> rows = new ArrayList<>();
+        List<AbstractWidget> cur = new ArrayList<>();
+        int curW = 0;
+        for (AbstractWidget w : widgets) {
+            int need = (cur.isEmpty() ? 0 : GAP) + w.getWidth();
+            if (!cur.isEmpty() && curW + need > avail) {
+                rows.add(cur);
+                cur = new ArrayList<>();
+                curW = 0;
+                need = w.getWidth();
+            }
+            cur.add(w);
+            curW += need;
+        }
+        rows.add(cur);
+
+        int y = this.height - MARGIN - rows.size() * ROW_H - (rows.size() - 1) * GAP;
+        int firstY = y;
+        for (List<AbstractWidget> row : rows) {
+            int x = MARGIN;
+            for (AbstractWidget w : row) {
+                w.setX(x);
+                w.setY(y);
+                x += w.getWidth() + GAP;
+            }
+            y += ROW_H + GAP;
+        }
+        return firstY;
+    }
+
+    // ================================================================== draft handling
+
+    private void loadDraftFromEngine() {
+        String name = engine.getScriptName();
+        if (name != null && MacroStorage.exists(name)) {
             try {
-                setEditorScript(MacroStorage.load(selectedName));
-                engine.setScript(editorScript());
-                status = "Loaded: " + selectedName + " (" + editorLines.size() + " lines)";
-            } catch (Exception e) {
-                setEditorScript(engine.getScript());
+                setDraftFromFile(name);
+                return;
+            } catch (IOException ignored) {
+                // fall through to the in-memory script
             }
         }
-        clampCursor();
-        refreshToggleLabels();
+        draftText = engine.getScript();
+        draftName = null;
+        savedText = null;
+        draftNameInput = name != null ? name : MacroStorage.uniqueName("macro");
     }
 
-    private String scriptNameForRow(int row) {
-        int idx = scriptPage * SCRIPT_ROWS + row;
-        return idx >= 0 && idx < scripts.size() ? scripts.get(idx) : "";
+    private static void setDraftFromFile(String name) throws IOException {
+        String text = MacroStorage.load(name);
+        draftText = text;
+        savedText = text;
+        draftName = MacroStorage.normalizeName(name);
+        draftNameInput = draftName;
     }
 
-    private int scriptIndexForRow(int row) {
-        int idx = scriptPage * SCRIPT_ROWS + row;
-        return idx >= 0 && idx < scripts.size() ? idx : -1;
+    /** Push the draft into the widgets after it was replaced programmatically. */
+    private void applyDraftToWidgets() {
+        editorSetter.accept(draftText);
+        nameSetter.accept(draftNameInput == null ? "" : draftNameInput);
+        validate();
+        scrollToSelected();
+        refreshListButtons();
+        refreshLabels();
     }
 
-    private void selectRow(int row) {
-        int idx = scriptIndexForRow(row);
-        if (idx < 0) return;
-        scriptIndex = idx;
-        selectedName = scripts.get(scriptIndex);
-        status = "Selected: " + selectedName;
-        this.rebuildWidgets();
+    private static boolean isDirty() {
+        return draftText != null && (savedText == null || !savedText.equals(draftText));
     }
 
-    private void editRow(int row) {
-        int idx = scriptIndexForRow(row);
-        if (idx < 0) return;
-        scriptIndex = idx;
-        selectedName = scripts.get(scriptIndex);
-        loadSelected();
+    private void onEditorChanged(String value) {
+        draftText = value;
+        validate();
     }
 
-    private void copyRow(int row) {
-        int idx = scriptIndexForRow(row);
-        if (idx < 0) return;
-        String source = scripts.get(idx);
+    private void validate() {
         try {
-            String target = nextCopyName(source);
-            MacroStorage.save(target, MacroStorage.load(source));
-            selectedName = target;
-            refreshScripts();
-            status = "Copied: " + target;
-            this.rebuildWidgets();
-        } catch (Exception e) { status = "Copy failed: " + e.getMessage(); }
-    }
-
-    private void deleteRow(int row) {
-        int idx = scriptIndexForRow(row);
-        if (idx < 0) return;
-        selectedName = scripts.get(idx);
-        deleteSelected();
-    }
-
-    private String nextCopyName(String source) throws Exception {
-        List<String> names = MacroStorage.listScriptNames();
-        for (int i = 1; i < 1000; i++) {
-            String name = source + "_copy" + i;
-            if (!names.contains(name)) return name;
+            int n = MacroParser.parse(draftText).size();
+            valid = true;
+            validation = Component.translatable("macro_mod.gui.valid", n);
+        } catch (MacroParser.ParseException e) {
+            valid = false;
+            validation = MacroModClient.describeError(e);
         }
-        return source + "_copy";
     }
 
-    private String nextNewName() throws Exception {
-        List<String> names = MacroStorage.listScriptNames();
-        for (int i = 1; i < 1000; i++) {
-            String name = "macro_" + i;
-            if (!names.contains(name)) return name;
-        }
-        return "macro_new";
-    }
-
-    private void stepScriptPage(int delta) {
-        int pages = Math.max(1, (scripts.size() + SCRIPT_ROWS - 1) / SCRIPT_ROWS);
-        scriptPage = (scriptPage + delta + pages) % pages;
-        this.rebuildWidgets();
-    }
-
-    private void refreshScripts() {
+    /** While stopped, the engine (and the hotkey) follows whatever the editor shows. */
+    private void syncEngineIfStopped() {
+        if (!engine.isStopped() || !valid) return;
         try {
-            scripts.clear();
-            scripts.addAll(MacroStorage.listScriptNames());
+            engine.setScript(draftText, isDirty() ? null : draftName);
+            if (draftName != null && !isDirty()) MacroModClient.rememberLastScript(draftName);
+        } catch (MacroParser.ParseException ignored) {
+            // validated above
+        }
+    }
+
+    // ================================================================== actions
+
+    private void onRun() {
+        if (!engine.isStopped()) {
+            say(MacroModClient.toggleRun(), COLOR_TEXT);
+            return;
+        }
+        if (!valid) {
+            say(Component.translatable("macro_mod.gui.fix_errors_first", validation), COLOR_ERR);
+            return;
+        }
+        engine.setScript(draftText, isDirty() ? null : draftName);
+        if (draftName != null && !isDirty()) MacroModClient.rememberLastScript(draftName);
+        Component result = MacroModClient.toggleRun();
+        if (engine.isRunning()) {
+            // The macro is frozen while any screen is open, so go back to the game.
+            onClose();
+            MacroModClient.notify(result, true);
+        } else {
+            say(result, COLOR_ERR);
+        }
+    }
+
+    private void onRowClicked(int row) {
+        int idx = listScroll + row;
+        if (idx < 0 || idx >= scripts.size()) return;
+        String name = scripts.get(idx);
+        if (name.equals(draftName)) return;
+        if (isDirty() && !confirm("open:" + name, Component.translatable("macro_mod.gui.confirm_discard"))) return;
+        try {
+            setDraftFromFile(name);
+            applyDraftToWidgets();
+            syncEngineIfStopped();
+            say(Component.translatable("macro_mod.gui.opened", name), COLOR_OK);
+        } catch (IOException e) {
+            sayError(e);
+        }
+    }
+
+    private void save() {
+        String name = MacroStorage.normalizeName(nameGetter.get());
+        if (!MacroStorage.isValidName(name)) {
+            say(Component.translatable("macro_mod.gui.invalid_name"), COLOR_ERR);
+            return;
+        }
+        boolean otherFile = draftName == null || !draftName.equalsIgnoreCase(name);
+        if (otherFile && MacroStorage.exists(name)
+                && !confirm("overwrite:" + name, Component.translatable("macro_mod.gui.confirm_overwrite", name))) {
+            return;
+        }
+        try {
+            MacroStorage.save(name, draftText);
+            draftName = name;
+            savedText = draftText;
+            draftNameInput = name;
+            refreshScriptList();
+            applyDraftToWidgets();
+            syncEngineIfStopped();
+            say(valid ? Component.translatable("macro_mod.gui.saved", name)
+                    : Component.translatable("macro_mod.gui.saved_with_errors", name), valid ? COLOR_OK : COLOR_WARN);
+        } catch (IOException e) {
+            sayError(e);
+        }
+    }
+
+    private void rename() {
+        if (draftName == null) {
+            save();
+            return;
+        }
+        String name = MacroStorage.normalizeName(nameGetter.get());
+        if (!MacroStorage.isValidName(name)) {
+            say(Component.translatable("macro_mod.gui.invalid_name"), COLOR_ERR);
+            return;
+        }
+        if (name.equals(draftName)) {
+            say(Component.translatable("macro_mod.gui.rename_same"), COLOR_WARN);
+            return;
+        }
+        try {
+            String old = draftName;
+            MacroStorage.rename(old, name);
+            if (old.equals(engine.getScriptName())) engine.setScriptName(name);
+            if (old.equals(MacroModClient.settings().lastScript)) MacroModClient.rememberLastScript(name);
+            draftName = name;
+            draftNameInput = name;
+            refreshScriptList();
+            applyDraftToWidgets();
+            say(Component.translatable("macro_mod.gui.renamed", old, name), COLOR_OK);
+        } catch (IOException e) {
+            sayError(e);
+        }
+    }
+
+    private void revert() {
+        if (draftName == null) return;
+        if (!isDirty()) {
+            say(Component.translatable("macro_mod.gui.nothing_to_revert"), COLOR_TEXT);
+            return;
+        }
+        if (!confirm("revert", Component.translatable("macro_mod.gui.confirm_discard"))) return;
+        try {
+            setDraftFromFile(draftName);
+            applyDraftToWidgets();
+            syncEngineIfStopped();
+            say(Component.translatable("macro_mod.gui.reverted"), COLOR_OK);
+        } catch (IOException e) {
+            sayError(e);
+        }
+    }
+
+    private void newScript() {
+        if (isDirty() && !confirm("new", Component.translatable("macro_mod.gui.confirm_discard"))) return;
+        draftText = NEW_TEMPLATE;
+        draftName = null;
+        savedText = null;
+        draftNameInput = MacroStorage.uniqueName("macro");
+        applyDraftToWidgets();
+        say(Component.translatable("macro_mod.gui.new_created"), COLOR_OK);
+        setFocused(editorWidget);
+    }
+
+    private void copyScript() {
+        if (draftName == null) return;
+        String target = MacroStorage.uniqueName(draftName + "_copy");
+        try {
+            MacroStorage.save(target, draftText);
+            setDraftFromFile(target);
+            refreshScriptList();
+            applyDraftToWidgets();
+            say(Component.translatable("macro_mod.gui.copied", target), COLOR_OK);
+        } catch (IOException e) {
+            sayError(e);
+        }
+    }
+
+    private void deleteScript() {
+        if (draftName == null) return;
+        String name = draftName;
+        if (!confirm("delete:" + name, Component.translatable("macro_mod.gui.confirm_delete", name))) return;
+        try {
+            int idx = scripts.indexOf(name);
+            MacroStorage.delete(name);
+            if (name.equals(engine.getScriptName())) engine.setScriptName(null);
+            refreshScriptList();
             if (scripts.isEmpty()) {
-                scriptIndex = 0;
-                scriptPage = 0;
+                draftText = NEW_TEMPLATE;
+                draftName = null;
+                savedText = null;
+                draftNameInput = MacroStorage.uniqueName("macro");
             } else {
-                int idx = scripts.indexOf(selectedName);
-                scriptIndex = idx >= 0 ? idx : Math.min(scriptIndex, scripts.size() - 1);
-                selectedName = scripts.get(scriptIndex);
+                setDraftFromFile(scripts.get(Mth.clamp(idx, 0, scripts.size() - 1)));
             }
-            scriptPage = Math.min(scriptPage, Math.max(0, (scripts.size() + SCRIPT_ROWS - 1) / SCRIPT_ROWS - 1));
-            status = "Loaded list: " + scripts.size() + " script(s)";
-        } catch (Exception e) { status = "Refresh failed: " + e.getMessage(); }
-    }
-
-    private void loadSelected() {
-        if (selectedName == null || selectedName.isBlank()) { status = "Name is empty"; return; }
-        try {
-            String script = MacroStorage.load(selectedName);
-            setEditorScript(script);
-            engine.setScript(script);
-            status = "Loaded: " + selectedName + " (" + editorLines.size() + " lines)";
-        } catch (Exception e) { status = "Load failed: " + e.getMessage(); }
-    }
-
-    private void saveCurrent() {
-        if (selectedName == null || selectedName.isBlank()) { status = "Name is empty"; return; }
-        try {
-            String script = editorScript();
-            engine.setScript(script);
-            MacroStorage.save(selectedName, script);
-            refreshScripts();
-            status = "Saved: " + selectedName;
-            this.rebuildWidgets();
-        } catch (Exception e) { status = "Save failed: " + e.getMessage(); }
-    }
-
-    private void deleteSelected() {
-        if (selectedName == null || selectedName.isBlank()) { status = "Name is empty"; return; }
-        try {
-            MacroStorage.delete(selectedName);
-            refreshScripts();
-            status = "Deleted: " + selectedName;
-            this.rebuildWidgets();
-        } catch (Exception e) { status = "Delete failed: " + e.getMessage(); }
-    }
-
-    private void newTemplate() {
-        String tpl = "LeftDown 1,\nFor 9,\nKeyDown \"W\", 1,\nKeyDown \"D\", 1,\nDelay 41000,\nKeyUp \"W\", 1,\nKeyUp \"D\", 1,\nDelay 500,\nNext,\nLeftUp 1,\n";
-        try {
-            selectedName = nextNewName();
-            setEditorScript(tpl);
-            engine.setScript(tpl);
-            MacroStorage.save(selectedName, tpl);
-            refreshScripts();
-            status = "Template created: " + selectedName;
-            this.rebuildWidgets();
-        } catch (Exception e) { status = "Template failed: " + e.getMessage(); }
-    }
-
-    private String editorScript() { return String.join("\n", editorLines).stripTrailing() + "\n"; }
-
-    private void setEditorScript(String script) {
-        editorLines.clear();
-        String text = script == null ? "" : script;
-        if (!text.isEmpty()) {
-            editorLines.addAll(List.of(text.split("\\R", -1)));
-            while (!editorLines.isEmpty() && editorLines.get(editorLines.size() - 1).isEmpty()) editorLines.remove(editorLines.size() - 1);
-        }
-        if (editorLines.isEmpty()) editorLines.add("");
-        cursorLine = 0; cursorCol = 0; scrollLine = 0; clampCursor();
-    }
-
-    private void refreshToggleLabels() {
-        if (repeatBtn != null) repeatBtn.setMessage(Component.literal("Repeat: " + (engine.isRepeat() ? "ON" : "OFF")));
-        if (aimLockBtn != null) aimLockBtn.setMessage(Component.literal("AimLock: " + (engine.isAimLock() ? "ON" : "OFF")));
-        if (toggleBindBtn != null) toggleBindBtn.setMessage(Component.literal(waitingBind == BindTarget.TOGGLE ? "Start/Pause: [Press key...]" : "Start/Pause: " + MacroModClient.getToggleKeyName()));
-        if (stopBindBtn != null) stopBindBtn.setMessage(Component.literal(waitingBind == BindTarget.STOP ? "Stop: [Press key...]" : "Stop: " + MacroModClient.getStopKeyName()));
-    }
-
-    private void toggleRun() {
-        try {
-            if (!engine.isRunning()) { engine.setScript(editorScript()); engine.start(); status = "Started"; }
-            else { engine.pauseToggle(); status = engine.isPaused() ? "Paused" : "Resumed"; }
-        } catch (Exception e) { status = "Run failed: " + e.getMessage(); }
-    }
-
-    private void insertText(String text) {
-        if (text == null || text.isEmpty()) return;
-        if (editorScript().length() + text.length() > MAX_SCRIPT_CHARS) return;
-        for (int i = 0; i < text.length(); i++) {
-            char c = text.charAt(i);
-            if (c == '\r') continue;
-            if (c == '\n') insertNewline(); else insertChar(String.valueOf(c));
+            applyDraftToWidgets();
+            syncEngineIfStopped();
+            say(Component.translatable("macro_mod.gui.deleted", name), COLOR_OK);
+        } catch (IOException e) {
+            sayError(e);
         }
     }
 
-    private void insertChar(String value) {
-        String line = editorLines.get(cursorLine);
-        editorLines.set(cursorLine, line.substring(0, cursorCol) + value + line.substring(cursorCol));
-        cursorCol += value.length(); ensureCursorVisible();
+    /** Switch between the safe editor and the vanilla IME editor. The draft is static, so nothing is lost. */
+    private void toggleIme() {
+        MacroModClient.setImeEditor(!MacroModClient.settings().imeEditor);
+        rebuildWidgets();
+        say(Component.translatable(MacroModClient.settings().imeEditor ? "macro_mod.gui.ime_on" : "macro_mod.gui.ime_off"),
+                MacroModClient.settings().imeEditor ? COLOR_WARN : COLOR_OK);
     }
 
-    private void insertNewline() {
-        String line = editorLines.get(cursorLine);
-        editorLines.set(cursorLine, line.substring(0, cursorCol));
-        editorLines.add(cursorLine + 1, line.substring(cursorCol));
-        cursorLine++; cursorCol = 0; ensureCursorVisible();
+    private void startBind(BindTarget target) {
+        waitingBind = target;
+        refreshLabels();
+        say(Component.translatable("macro_mod.gui.bind_prompt"), COLOR_WARN);
     }
 
-    private void backspace() {
-        if (cursorCol > 0) {
-            String line = editorLines.get(cursorLine);
-            editorLines.set(cursorLine, line.substring(0, cursorCol - 1) + line.substring(cursorCol));
-            cursorCol--;
-        } else if (cursorLine > 0) {
-            int oldLen = editorLines.get(cursorLine - 1).length();
-            editorLines.set(cursorLine - 1, editorLines.get(cursorLine - 1) + editorLines.get(cursorLine));
-            editorLines.remove(cursorLine); cursorLine--; cursorCol = oldLen;
+    /** First call arms the action and shows the prompt; a second call within a few seconds confirms it. */
+    private boolean confirm(String token, Component prompt) {
+        long now = System.currentTimeMillis();
+        if (token.equals(pendingConfirm) && now < pendingUntil) {
+            pendingConfirm = null;
+            return true;
         }
-        ensureCursorVisible();
+        pendingConfirm = token;
+        pendingUntil = now + CONFIRM_MS;
+        say(prompt, COLOR_WARN);
+        return false;
     }
 
-    private void deleteForward() {
-        String line = editorLines.get(cursorLine);
-        if (cursorCol < line.length()) editorLines.set(cursorLine, line.substring(0, cursorCol) + line.substring(cursorCol + 1));
-        else if (cursorLine < editorLines.size() - 1) { editorLines.set(cursorLine, line + editorLines.get(cursorLine + 1)); editorLines.remove(cursorLine + 1); }
-        ensureCursorVisible();
+    private void say(Component msg, int color) {
+        message = msg;
+        messageColor = color;
+        messageTime = System.currentTimeMillis();
     }
 
-    private void moveCursor(int lineDelta, int colDelta) {
-        cursorLine = Math.max(0, Math.min(editorLines.size() - 1, cursorLine + lineDelta));
-        cursorCol = Math.max(0, Math.min(editorLines.get(cursorLine).length(), cursorCol + colDelta));
-        ensureCursorVisible();
+    private void sayError(Exception e) {
+        say(MacroModClient.describeError(e), COLOR_ERR);
     }
 
-    private void clampCursor() {
-        if (editorLines.isEmpty()) editorLines.add("");
-        cursorLine = Math.max(0, Math.min(editorLines.size() - 1, cursorLine));
-        cursorCol = Math.max(0, Math.min(editorLines.get(cursorLine).length(), cursorCol));
-        ensureCursorVisible();
-    }
+    // ================================================================== list
 
-    private void ensureCursorVisible() {
-        if (cursorLine < scrollLine) scrollLine = cursorLine;
-        if (cursorLine >= scrollLine + visibleEditorLines) scrollLine = cursorLine - visibleEditorLines + 1;
-        scrollLine = Math.max(0, Math.min(scrollLine, Math.max(0, editorLines.size() - visibleEditorLines)));
-    }
-
-    private String keyToText(int key, int modifiers) {
-        boolean shift = (modifiers & GLFW.GLFW_MOD_SHIFT) != 0;
-        if (key >= GLFW.GLFW_KEY_A && key <= GLFW.GLFW_KEY_Z) {
-            char c = (char) ('a' + key - GLFW.GLFW_KEY_A);
-            return shift ? String.valueOf(c).toUpperCase(Locale.ROOT) : String.valueOf(c);
+    private void refreshScriptList() {
+        scripts.clear();
+        try {
+            scripts.addAll(MacroStorage.listScriptNames());
+        } catch (IOException e) {
+            sayError(e);
         }
-        if (key >= GLFW.GLFW_KEY_0 && key <= GLFW.GLFW_KEY_9) {
-            String normal = "0123456789";
-            String shifted = ")!@#$%^&*(";
-            return String.valueOf((shift ? shifted : normal).charAt(key - GLFW.GLFW_KEY_0));
-        }
-        return switch (key) {
-            case GLFW.GLFW_KEY_SPACE -> " ";
-            case GLFW.GLFW_KEY_COMMA -> shift ? "<" : ",";
-            case GLFW.GLFW_KEY_PERIOD -> shift ? ">" : ".";
-            case GLFW.GLFW_KEY_SLASH -> shift ? "?" : "/";
-            case GLFW.GLFW_KEY_SEMICOLON -> shift ? ":" : ";";
-            case GLFW.GLFW_KEY_APOSTROPHE -> shift ? "\"" : "'";
-            case GLFW.GLFW_KEY_LEFT_BRACKET -> shift ? "{" : "[";
-            case GLFW.GLFW_KEY_RIGHT_BRACKET -> shift ? "}" : "]";
-            case GLFW.GLFW_KEY_BACKSLASH -> shift ? "|" : "\\";
-            case GLFW.GLFW_KEY_MINUS -> shift ? "_" : "-";
-            case GLFW.GLFW_KEY_EQUAL -> shift ? "+" : "=";
-            case GLFW.GLFW_KEY_GRAVE_ACCENT -> shift ? "~" : "`";
-            default -> null;
-        };
+        clampListScroll();
     }
 
-    @Override
-    public void extractBackground(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float delta) {
-        graphics.fill(0, 0, this.width, this.height, 0xB0101010);
-        int margin = 10;
-        int leftWidth = Math.min(430, Math.max(360, this.width * 34 / 100));
-        int editorLeft = margin + leftWidth + 12;
-        int editorTop = 10;
-        int editorRight = this.width - margin;
-        int editorBottom = this.height - 52;
-        graphics.fill(editorLeft - 2, editorTop - 2, editorRight + 2, editorBottom + 2, 0xFFAAAAAA);
-        graphics.fill(editorLeft, editorTop, editorRight, editorBottom, 0xFF050505);
+    private void clampListScroll() {
+        listScroll = Mth.clamp(listScroll, 0, Math.max(0, scripts.size() - Math.max(1, listRows)));
     }
 
-    @Override
-    public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float delta) {
-        int margin = 10;
-        int leftWidth = Math.min(430, Math.max(360, this.width * 34 / 100));
-        int editorLeft = margin + leftWidth + 12;
-        int editorTop = 10;
-        int editorRight = this.width - margin;
-        int editorBottom = this.height - 52;
-        graphics.fill(editorLeft - 2, editorTop - 2, editorRight + 2, editorBottom + 2, 0xFFAAAAAA);
-        graphics.fill(editorLeft, editorTop, editorRight, editorBottom, 0xFF050505);
-        super.extractRenderState(graphics, mouseX, mouseY, delta);
+    private void scrollToSelected() {
+        int idx = draftName == null ? -1 : scripts.indexOf(draftName);
+        if (idx < 0) return;
+        if (idx < listScroll) listScroll = idx;
+        if (idx >= listScroll + listRows) listScroll = idx - listRows + 1;
+        clampListScroll();
+    }
 
-        for (int i = 0; i < visibleEditorLines; i++) {
-            int lineIndex = scrollLine + i;
-            if (lineIndex >= editorLines.size()) break;
-            String line = editorLines.get(lineIndex);
-            int y = editorTop + 7 + i * 14;
-            graphics.text(this.font, line, editorLeft + 7, y, 0xFFFFFF, true);
-            if (lineIndex == cursorLine && (System.currentTimeMillis() / 500) % 2 == 0) {
-                int cursorX = editorLeft + 7 + this.font.width(line.substring(0, Math.min(cursorCol, line.length())));
-                graphics.fill(cursorX, y - 1, cursorX + 1, y + 10, 0xFFFFFFFF);
+    private void refreshListButtons() {
+        boolean dirty = isDirty();
+        for (int i = 0; i < rowButtons.size(); i++) {
+            Button b = rowButtons.get(i);
+            int idx = listScroll + i;
+            if (idx >= scripts.size()) {
+                b.visible = false;
+                continue;
+            }
+            String name = scripts.get(idx);
+            b.visible = true;
+            if (name.equals(draftName)) {
+                b.setMessage(Component.literal("▶ " + name + (dirty ? " *" : "")).withStyle(ChatFormatting.YELLOW));
+            } else if (name.equals(engine.getScriptName()) && !engine.isStopped()) {
+                b.setMessage(Component.literal(name).withStyle(ChatFormatting.GREEN));
+            } else {
+                b.setMessage(Component.literal(name));
             }
         }
-
-        graphics.text(this.font, Component.literal(editorScript().length() + "/" + MAX_SCRIPT_CHARS), editorRight - 92, editorBottom + 8, 0xD0D0D0, false);
-        int color = status.toLowerCase().contains("failed") ? 0xFF6060 : 0x80FF80;
-        graphics.text(this.font, Component.literal(status), margin, this.height - 20, color, false);
-        graphics.text(this.font, Component.literal("Page " + (scriptPage + 1) + "/" + Math.max(1, (scripts.size() + SCRIPT_ROWS - 1) / SCRIPT_ROWS)), margin + leftWidth - 90, this.height - 20, 0xD0D0D0, false);
     }
 
+    // ================================================================== labels / tick
+
     @Override
-    public boolean keyPressed(KeyEvent keyInput) {
-        int keyCode = keyInput.key();
-        if (waitingBind == BindTarget.TOGGLE) { MacroModClient.setToggleKeyCode(keyCode); waitingBind = BindTarget.NONE; refreshToggleLabels(); status = "Start/Pause hotkey updated"; return true; }
-        if (waitingBind == BindTarget.STOP) { MacroModClient.setStopKeyCode(keyCode); waitingBind = BindTarget.NONE; refreshToggleLabels(); status = "Stop hotkey updated"; return true; }
-        boolean ctrl = (keyInput.modifiers() & GLFW.GLFW_MOD_CONTROL) != 0;
-        switch (keyCode) {
-            case GLFW.GLFW_KEY_V -> { if (ctrl) { insertText(Minecraft.getInstance().keyboardHandler.getClipboard()); return true; } }
-            case GLFW.GLFW_KEY_ENTER, GLFW.GLFW_KEY_KP_ENTER -> { insertNewline(); return true; }
-            case GLFW.GLFW_KEY_BACKSPACE -> { backspace(); return true; }
-            case GLFW.GLFW_KEY_DELETE -> { deleteForward(); return true; }
-            case GLFW.GLFW_KEY_LEFT -> { moveCursor(0, -1); return true; }
-            case GLFW.GLFW_KEY_RIGHT -> { moveCursor(0, 1); return true; }
-            case GLFW.GLFW_KEY_UP -> { moveCursor(-1, 0); return true; }
-            case GLFW.GLFW_KEY_DOWN -> { moveCursor(1, 0); return true; }
-            case GLFW.GLFW_KEY_HOME -> { cursorCol = 0; ensureCursorVisible(); return true; }
-            case GLFW.GLFW_KEY_END -> { cursorCol = editorLines.get(cursorLine).length(); ensureCursorVisible(); return true; }
-            case GLFW.GLFW_KEY_PAGE_UP -> { scrollLine = Math.max(0, scrollLine - visibleEditorLines); cursorLine = scrollLine; clampCursor(); return true; }
-            case GLFW.GLFW_KEY_PAGE_DOWN -> { scrollLine = Math.min(Math.max(0, editorLines.size() - visibleEditorLines), scrollLine + visibleEditorLines); cursorLine = scrollLine; clampCursor(); return true; }
+    public void tick() {
+        super.tick();
+        refreshLabels();
+        refreshListButtons();
+    }
+
+    private void refreshLabels() {
+        if (runBtn == null) return;
+        runBtn.setMessage(switch (engine.state()) {
+            case STOPPED -> Component.translatable("macro_mod.gui.start");
+            case RUNNING -> Component.translatable("macro_mod.gui.pause");
+            case PAUSED -> Component.translatable("macro_mod.gui.resume");
+        });
+        stopBtn.setMessage(Component.translatable("macro_mod.gui.stop"));
+        stopBtn.active = !engine.isStopped();
+        repeatBtn.setMessage(Component.translatable("macro_mod.gui.repeat", MacroModClient.onOff(engine.isRepeat())));
+        aimBtn.setMessage(Component.translatable("macro_mod.gui.aimlock", MacroModClient.onOff(engine.isAimLock())));
+        hudBtn.setMessage(Component.translatable("macro_mod.gui.hud", MacroModClient.onOff(MacroModClient.settings().showHud)));
+        imeBtn.setMessage(Component.translatable("macro_mod.gui.ime", MacroModClient.onOff(MacroModClient.settings().imeEditor)));
+        toggleBindBtn.setMessage(Component.translatable("macro_mod.gui.bind_toggle", bindLabel(BindTarget.TOGGLE, MacroModClient.toggleKey())));
+        stopBindBtn.setMessage(Component.translatable("macro_mod.gui.bind_stop", bindLabel(BindTarget.STOP, MacroModClient.stopKey())));
+        boolean hasFile = draftName != null;
+        copyBtn.active = hasFile;
+        deleteBtn.active = hasFile;
+        renameBtn.active = hasFile;
+        revertBtn.active = hasFile;
+    }
+
+    private Component bindLabel(BindTarget target, KeyMapping key) {
+        if (waitingBind == target) return Component.literal("> ? <").withStyle(ChatFormatting.YELLOW);
+        return key.getTranslatedKeyMessage();
+    }
+
+    // ================================================================== input
+
+    @Override
+    public boolean keyPressed(KeyEvent event) {
+        if (waitingBind != BindTarget.NONE) {
+            KeyMapping km = waitingBind == BindTarget.TOGGLE ? MacroModClient.toggleKey() : MacroModClient.stopKey();
+            waitingBind = BindTarget.NONE;
+            if (event.isEscape()) {
+                say(Component.translatable("macro_mod.gui.bind_cancelled"), COLOR_TEXT);
+            } else {
+                km.setKey(InputConstants.getKey(event));
+                KeyMapping.resetMapping();
+                this.minecraft.options.save(); // vanilla options.txt is the single source of truth
+                say(Component.translatable("macro_mod.gui.bind_set", km.getTranslatedKeyMessage()), COLOR_OK);
+            }
+            refreshLabels();
+            return true;
         }
-        String text = keyToText(keyCode, keyInput.modifiers());
-        if (text != null && !ctrl) { insertText(text); return true; }
-        return super.keyPressed(keyInput);
+        if (event.hasControlDown() && event.key() == InputConstants.KEY_S) {
+            save();
+            return true;
+        }
+        return super.keyPressed(event);
     }
 
     @Override
-    public void onClose() { Minecraft.getInstance().setScreen(null); }
+    public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+        boolean overList = mouseX >= leftX && mouseX < leftX + leftW
+                && mouseY >= listTop && mouseY < listTop + listRows * (ROW_H + 2);
+        if (overList && scripts.size() > listRows) {
+            listScroll -= (int) Math.signum(scrollY);
+            clampListScroll();
+            refreshListButtons();
+            return true;
+        }
+        return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
+    }
+
+    @Override
+    public boolean isPauseScreen() {
+        return false;
+    }
+
+    @Override
+    public void removed() {
+        waitingBind = BindTarget.NONE;
+        syncEngineIfStopped();
+        super.removed();
+    }
+
+    // ================================================================== rendering
+
+    @Override
+    public void extractBackground(GuiGraphicsExtractor g, int mouseX, int mouseY, float delta) {
+        super.extractBackground(g, mouseX, mouseY, delta);
+        // script list panel
+        g.fill(leftX - 3, top - 3, leftX + leftW + 3, contentBottom + 3, 0x90000000);
+        g.fill(leftX - 3, top - 3, leftX + leftW + 3, top - 2, 0x40FFFFFF);
+    }
+
+    @Override
+    public void extractRenderState(GuiGraphicsExtractor g, int mouseX, int mouseY, float delta) {
+        super.extractRenderState(g, mouseX, mouseY, delta);
+
+        // title + live engine status
+        g.text(this.font, this.title, leftX, 6, 0xFFFFFFFF, true);
+        int statusX = leftX + this.font.width(this.title) + 12;
+        MutableComponent status = MacroStatus.describe(engine);
+        if (this.font.width(status) > this.width - MARGIN - statusX) status = MacroStatus.stateLabel(engine);
+        g.text(this.font, status, Math.max(statusX, this.width - MARGIN - this.font.width(status)), 6, MacroStatus.color(engine), true);
+
+        // list header
+        g.text(this.font, Component.translatable("macro_mod.gui.scripts", scripts.size()), leftX, top + 1, COLOR_TEXT, false);
+        if (scripts.size() > listRows) {
+            String range = (listScroll + 1) + "-" + Math.min(scripts.size(), listScroll + listRows) + "/" + scripts.size();
+            g.text(this.font, range, leftX + leftW - this.font.width(range), top + 1, COLOR_DIM, false);
+        }
+        if (scripts.isEmpty()) {
+            g.text(this.font, Component.translatable("macro_mod.gui.no_scripts"), leftX + 4, listTop + 6, COLOR_DIM, false);
+        }
+
+        // name label
+        g.text(this.font, Component.translatable("macro_mod.gui.name"), rightX, top + 6, COLOR_TEXT, false);
+
+        // validation + dirty marker below the editor
+        int vy = editorWidget.getBottom() + 3;
+        Component v = Component.literal(valid ? "✔ " : "✖ ").append(validation);
+        g.text(this.font, v, rightX, vy, valid ? COLOR_OK : COLOR_ERR, false);
+        if (isDirty()) {
+            Component d = Component.translatable(draftName == null ? "macro_mod.gui.unsaved_new" : "macro_mod.gui.unsaved");
+            g.text(this.font, d, rightX + rightW - this.font.width(d), vy, COLOR_WARN, false);
+        }
+
+        // transient message above the bottom bar
+        if (System.currentTimeMillis() - messageTime < MESSAGE_MS) {
+            g.text(this.font, message, MARGIN, barTop - 11, messageColor, false);
+        }
+    }
 
     private enum BindTarget { NONE, TOGGLE, STOP }
 }

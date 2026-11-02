@@ -3,15 +3,22 @@
   "id": "client_utilities",
   "version": "${version}",
   "name": "Client Utilities",
-  "description": "Scriptable macro mod (WASD/left click/delay/for loop) with import/export.",
+  "description": "Scriptable client-side macros (keys, mouse, delays, loops) with an in-game editor.",
   "authors": ["linbei"],
+  "contact": {
+    "sources": "https://github.com/linbeize/minecraft-macro-mod"
+  },
   "environment": "client",
   "entrypoints": {
     "client": ["de.linbei.macro.MacroModClient"]
   },
+  "mixins": [
+    "client_utilities.mixins.json"
+  ],
   "depends": {
-    "fabricloader": ">=0.19.2",
-    "minecraft": "~26.1",
+    "fabricloader": "${min_loader}",
+    "fabric-api": "*",
+    "minecraft": "${minecraft}",
     "java": ">=25"
   }
 }
