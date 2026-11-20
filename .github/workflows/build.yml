@@ -31,11 +31,10 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: 9.5.1
 
       - name: Build
-        run: gradle build -Pmc=${{ matrix.mc }} --no-daemon --stacktrace
+        shell: bash
+        run: ./gradlew build -Pmc=${{ matrix.mc }} --no-daemon --stacktrace
 
       - name: Upload jars
         if: always()
