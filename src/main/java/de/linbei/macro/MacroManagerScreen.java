@@ -1,6 +1,7 @@
 package de.linbei.macro;
 
 import com.mojang.blaze3d.platform.InputConstants;
+import de.linbei.macro.compat.Compat;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -85,6 +86,7 @@ public class MacroManagerScreen extends Screen {
     private Button repeatBtn;
     private Button aimBtn;
     private Button hudBtn;
+    private Button chEventsBtn;
     private Button toggleBindBtn;
     private Button stopBindBtn;
     private Button copyBtn;
@@ -149,11 +151,14 @@ public class MacroManagerScreen extends Screen {
                 "macro_mod.gui.bind.tooltip", b -> startBind(BindTarget.STOP));
         imeBtn = button(fit(50, Component.translatable("macro_mod.gui.ime", MacroModClient.onOff(false))),
                 "macro_mod.gui.ime.tooltip", b -> toggleIme());
+        chEventsBtn = button(fit(60, Component.translatable("macro_mod.gui.chevents")),
+                "macro_mod.gui.chevents.tooltip", b -> Compat.setScreen(this.minecraft, new ChEventsScreen(this)));
+        chEventsBtn.setMessage(Component.translatable("macro_mod.gui.chevents"));
         Button help = button(20, "macro_mod.gui.help", b -> {});
         help.setMessage(Component.literal("?"));
         Button done = button(fit(50, Component.translatable("gui.done")), null, b -> onClose());
         done.setMessage(Component.translatable("gui.done"));
-        List<AbstractWidget> bar = List.of(runBtn, stopBtn, repeatBtn, aimBtn, hudBtn, toggleBindBtn, stopBindBtn, imeBtn, help, done);
+        List<AbstractWidget> bar = List.of(runBtn, stopBtn, repeatBtn, aimBtn, hudBtn, chEventsBtn, toggleBindBtn, stopBindBtn, imeBtn, help, done);
         barTop = flowLayout(bar);
         bar.forEach(this::addRenderableWidget);
         contentBottom = barTop - 14;

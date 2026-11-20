@@ -47,7 +47,7 @@
   - 默认是**安全编辑器**（不开启输入法），因为开启 IME 会让部分客户端（如 Lunar）崩溃；中文可以 Ctrl+V 粘贴
   - 底栏“输入法”开关可切换到原版编辑器，直接输入中文（设置保存在 `settings.properties` 的 `imeEditor`）
 - 名称框 + 保存（Ctrl+S）/ 重命名 / 还原；未保存修改有标记，关闭界面草稿也不会丢
-- 底栏：开始/暂停、停止、循环、视角锁定、HUD、热键设置、帮助（`?`）
+- 底栏：开始/暂停、停止、循环、视角锁定、HUD、矿洞事件、热键设置、帮助（`?`）
 - 宏停止时，热键运行的就是编辑器里看到的脚本
 
 ## 指令
@@ -56,6 +56,14 @@
 - `/mmacro load <名称>`（别名 `import`），`/mmacro save <名称>`（别名 `export`），支持 Tab 补全
 - `/mmacro set <命令; 命令; ...>` 直接设置脚本
 - `/mmacro repeat on|off`、`/mmacro aimlock on|off`、`/mmacro hud on|off`
+- `/mmacro chevents` 打开矿洞事件设置，`/mmacro chevents on|off` 直接开关
+
+## 矿洞事件显示
+
+在游戏中显示 Hypixel SkyBlock 矮人矿山 / 水晶洞窟当前和即将开始的事件（剩余时间、大厅数），数据来自 [api.soopy.dev](https://api.soopy.dev/skyblock/chevents/get)。
+
+- 宏管理器底栏“矿洞事件”或 `/mmacro chevents` 打开设置界面：开关显示、**拖动方框调整位置**、重置位置
+- 默认关闭；开启后只在进入世界时大约每分钟请求一次
 
 ## 文件
 
