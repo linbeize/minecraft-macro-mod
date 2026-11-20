@@ -41,6 +41,9 @@ public final class MacroSettings {
         s.showHud = Boolean.parseBoolean(p.getProperty("showHud", Boolean.toString(s.showHud)));
         s.lastScript = p.getProperty("lastScript", s.lastScript);
         s.imeEditor = Boolean.parseBoolean(p.getProperty("imeEditor", Boolean.toString(s.imeEditor)));
+        s.chEvents = Boolean.parseBoolean(p.getProperty("chEvents", Boolean.toString(s.chEvents)));
+        s.chEventsX = parseInt(p.getProperty("chEventsX"), s.chEventsX);
+        s.chEventsY = parseInt(p.getProperty("chEventsY"), s.chEventsY);
         return s;
     }
 
@@ -52,6 +55,9 @@ public final class MacroSettings {
             p.setProperty("stopOnContainer", Boolean.toString(s.stopOnContainer));
             p.setProperty("showHud", Boolean.toString(s.showHud));
             p.setProperty("imeEditor", Boolean.toString(s.imeEditor));
+            p.setProperty("chEvents", Boolean.toString(s.chEvents));
+            p.setProperty("chEventsX", Integer.toString(s.chEventsX));
+            p.setProperty("chEventsY", Integer.toString(s.chEventsY));
             if (s.lastScript != null) p.setProperty("lastScript", s.lastScript);
             try (OutputStream out = Files.newOutputStream(FILE)) {
                 p.store(out, "Macro mod settings (hotkeys live in options.txt)");
@@ -80,5 +86,9 @@ public final class MacroSettings {
         public String lastScript = "example";
         /** Vanilla text widgets with IME (Chinese input). Off by default: enabling IME crashed some clients (Lunar). */
         public boolean imeEditor = false;
+        /** Mining events overlay (api.soopy.dev); off by default, it makes network requests. */
+        public boolean chEvents = false;
+        public int chEventsX = ChEventsScreen.DEFAULT_X;
+        public int chEventsY = ChEventsScreen.DEFAULT_Y;
     }
 }

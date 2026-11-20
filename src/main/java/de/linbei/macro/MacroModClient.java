@@ -83,6 +83,7 @@ public class MacroModClient implements ClientModInitializer {
         ClientTickEvents.END_CLIENT_TICK.register(MacroModClient::onTick);
         registerCommands();
         MacroHud.register();
+        ChEventsHud.register();
     }
 
     private static KeyMapping registerKey(String name, int defaultKey, KeyMapping.Category category) {
@@ -112,6 +113,8 @@ public class MacroModClient implements ClientModInitializer {
         while (guiKey.consumeClick()) Compat.setScreen(client, new MacroManagerScreen());
 
         ENGINE.tick(client);
+        // Also fetch while the position editor is open, so its preview has real data.
+        ChEvents.tick((settings.chEvents && client.level != null) || Compat.screen(client) instanceof ChEventsScreen);
     }
 
     // ------------------------------------------------------------------ shared actions (keys, commands, GUI)
@@ -157,6 +160,19 @@ public class MacroModClient implements ClientModInitializer {
         settings.showHud = on;
         MacroSettings.save(settings);
         return Component.translatable("macro_mod.msg.hud", onOff(on));
+    }
+
+    public static Component setChEvents(boolean on) {
+        settings.chEvents = on;
+        MacroSettings.save(settings);
+        if (on) ChEvents.refreshSoon();
+        return Component.translatable("macro_mod.msg.chevents", onOff(on));
+    }
+
+    public static void setChEventsPos(int x, int y) {
+        settings.chEventsX = x;
+        settings.chEventsY = y;
+        MacroSettings.save(settings);
     }
 
     public static void setImeEditor(boolean on) {
@@ -288,7 +304,13 @@ public class MacroModClient implements ClientModInitializer {
                             })))
                     .then(toggle("repeat", MacroModClient::setRepeat))
                     .then(toggle("aimlock", MacroModClient::setAimLock))
-                    .then(toggle("hud", MacroModClient::setShowHud));
+                    .then(toggle("hud", MacroModClient::setShowHud))
+                    .then(toggle("chevents", MacroModClient::setChEvents)
+                            .executes(ctx -> {
+                                Minecraft mc = ctx.getSource().getClient();
+                                mc.execute(() -> Compat.setScreen(mc, new ChEventsScreen(null)));
+                                return 1;
+                            }));
             dispatcher.register(root);
         });
     }
