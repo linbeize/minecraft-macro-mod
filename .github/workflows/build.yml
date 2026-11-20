@@ -4,7 +4,7 @@ on:
   pull_request:
   push:
     branches:
-      - codex/update-minecraft-26-1
+      - master
   workflow_dispatch:
 
 permissions:
@@ -12,8 +12,12 @@ permissions:
 
 jobs:
   build:
-    name: Build with Java 25
+    name: Build MC ${{ matrix.mc }}
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mc: ['26.1', '26.2', '26.3']
 
     steps:
       - name: Checkout
@@ -27,16 +31,15 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: 9.5.1
 
       - name: Build
-        run: gradle build --no-daemon --stacktrace
+        shell: bash
+        run: ./gradlew build -Pmc=${{ matrix.mc }} --no-daemon --stacktrace
 
       - name: Upload jars
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: minecraft-macro-mod-jars
+          name: minecraft-macro-mod-mc${{ matrix.mc }}
           path: build/libs/*.jar
           if-no-files-found: warn
